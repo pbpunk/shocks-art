@@ -23,6 +23,7 @@ def _load_dotenv() -> dict[str, str]:
 @dataclass(frozen=True)
 class Settings:
     database_url: str = "sqlite:///./data/shocks_art.db"
+    library_ingest_path: str = "./data/library_inbox"
     youtube_api_key: str = ""
     youtube_channel_handle: str = "shocksart"
     youtube_oauth_client_secrets_file: str = ""
@@ -47,6 +48,7 @@ def get_settings() -> Settings:
 
     return Settings(
         database_url=read("DATABASE_URL", Settings.database_url),
+        library_ingest_path=read("LIBRARY_INGEST_PATH", Settings.library_ingest_path),
         youtube_api_key=read("YOUTUBE_API_KEY", ""),
         youtube_channel_handle=read("YOUTUBE_CHANNEL_HANDLE", Settings.youtube_channel_handle),
         youtube_oauth_client_secrets_file=read("YOUTUBE_OAUTH_CLIENT_SECRETS_FILE", ""),
