@@ -1,6 +1,22 @@
 (() => {
   const script = document.currentScript;
   const endpoint = script?.dataset.newStateUrl;
+
+  const favoriteFilter = document.querySelector('.favorite-filter[data-filter="favorites"]');
+  const nonFavoriteFilter = document.querySelector('.favorite-filter[data-filter="not-favorites"]');
+
+  if (favoriteFilter) {
+    favoriteFilter.textContent = "♥";
+    favoriteFilter.setAttribute("aria-label", "Show favorites");
+    favoriteFilter.setAttribute("title", "Favorites");
+  }
+
+  if (nonFavoriteFilter) {
+    nonFavoriteFilter.textContent = "♡";
+    nonFavoriteFilter.setAttribute("aria-label", "Show clips that are not favorited");
+    nonFavoriteFilter.setAttribute("title", "Not favorite");
+  }
+
   if (!endpoint) return;
 
   fetch(endpoint)
