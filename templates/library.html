@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="panel">
+  <div class="section-heading">
+    <div>
+      <p class="eyebrow">Library</p>
+      <h1>Media catalog</h1>
+      <p class="muted">The source layer for searchable footage. Semantic indexing comes next.</p>
+    </div>
+    <form method="post" action="{{ url_path(request, '/actions/library/ingest') }}">
+      <button type="submit">Scan inbox</button>
+    </form>
+  </div>
+
+  {% if ingest_message %}
+    <div class="notice {{ 'error' if ingest_status == 'error' else 'success' }}">
+      {{ ingest_message }}
+    </div>
+  {% endif %}
+
+  <div class="stats-grid">
+    <article class="stat-card">
+      <span class="stat-label">Media</span>
+      <strong>{{ media_count }}</strong>
+      <span class="muted">Indexed source records</span>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Video</span>
+      <strong>{{ video_count }}</strong>
+      <span class="muted">Video sources</span>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Images</span>
+      <strong>{{ image_count }}</strong>
+      <span class="muted">Still-image sources</span>
+    </article>
+    <article class="stat-card">
+      <span class="stat-label">Inbox</span>
+      <strong>{{ inbox_file_count }}</strong>
+      <span class="muted">Supported files currently on disk</span>
+    </article>
+  </div>
+
+  <section class="panel inset-panel">
+    <div class="section-heading">
+      <div>
+        <h2>Local ingest</h2>
+        <p class="muted"><code>{{ ingest_path }}</code></p>
+      </div>
+      <span class="muted">Drop media here, then Scan inbox. Re-scans are safe.</span>
+    </div>
+  </section>
+
+  <form method="get" action="{{ url_path(request, '/library') }}" class="filter-row">
+    <label class="grow">
+      <span>Catalog filter</span>
+      <input type="search" name="q" value="{{ query }}" placeholder="Filter titles or filenames">
+    </label>
+    <button type="submit">Filter</button>
+    {% if query %}<a class="button secondary" href="{{ url_path(request, '/library') }}">Clear</a>{% endif %}
+  </form>
+
+  {% if media_items %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Media</th>
+            <th>Duration</th>
+            <th>Dimensions</th>
+            <th>Size</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for media in media_items %}
+            <tr>
+              <td>{{ media.media_kind|upper }}</td>
+              <td>
+                <strong>{{ media.title or media.filename }}</strong><br>
+                <span class="muted">{{ media.filename }}</span>
+              </td>
+              <td>
+                {% if media.duration_seconds is not none %}
+                  {{ "%.1f"|format(media.duration_seconds) }}s
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td>{{ media.width }}×{{ media.height if media.width and media.height else '—' }}</td>
+              <td>{{ "%.1f"|format(media.size_bytes / 1048576) }} MB</td>
+              <td>{{ media.processing_status }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="empty-state">
+      <h2>No Media yet</h2>
+      <p class="muted">Put images or videos in <code>{{ ingest_path }}</code> and press <strong>Scan inbox</strong>.</p>
+    </div>
+  {% endif %}
+
+  <p class="muted">This catalog filter is filename/title based. The upcoming semantic search will deliberately score visual/language traces independently of filenames.</p>
+</section>
+{% endblock %}
