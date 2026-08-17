@@ -2,56 +2,13 @@
   margin-top: -12px;
 }
 
-.clips-refresh-bar {
+.clips-dashboard .public-controls {
   display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 32px;
-  margin: 0 0 6px;
-}
-
-.clips-refresh-bar form {
-  margin: 0;
-}
-
-.clips-refresh-bar button {
-  min-height: 32px;
-  padding: 0 10px;
-  font-size: 13px;
-}
-
-.clips-refresh-message {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.clips-refresh-message.is-error {
-  color: var(--danger);
-}
-
-.clips-dashboard .public-head {
-  margin: 0 0 6px;
-  padding: 0;
-}
-
-.clips-dashboard .public-head h1 {
-  font-size: 24px;
-}
-
-.clips-dashboard .public-head p {
-  margin: 0;
-  font-size: 13px;
-}
-
-.clips-dashboard .public-controls {
+  flex-wrap: wrap;
+  gap: 6px;
   margin-top: 0;
   margin-bottom: 10px;
-  gap: 8px;
 }
 
 .clips-dashboard .public-filters,
@@ -64,6 +21,48 @@
   min-height: 32px;
   padding: 0 10px;
   font-size: 13px;
+}
+
+.clips-refresh-bar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  min-height: 32px;
+  margin-left: auto;
+}
+
+.clips-refresh-bar form {
+  margin: 0;
+}
+
+.clips-update-button {
+  min-height: 32px;
+  gap: 6px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.clips-update-button svg {
+  width: 15px;
+  height: 15px;
+  flex: 0 0 auto;
+}
+
+.clips-refresh-message {
+  max-width: min(42vw, 520px);
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clips-refresh-message.is-error {
+  color: var(--danger);
 }
 
 .new-chip {
@@ -88,12 +87,12 @@
   }
 
   .clips-refresh-bar {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 5px;
+    width: 100%;
+    margin-left: 0;
   }
 
   .clips-refresh-message {
-    white-space: normal;
+    flex: 1 1 auto;
+    max-width: none;
   }
 }
