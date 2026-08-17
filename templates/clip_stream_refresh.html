@@ -1,12 +1,17 @@
 {% set refresh_status = request.query_params.get('refresh_status') %}
 {% set refresh_message = request.query_params.get('refresh_message') %}
-<section class="clips-refresh-bar" aria-label="Livestream intake">
-  <form method="post" action="{{ url_path(request, '/actions/clips/refresh-streams') }}">
-    <button type="submit">Check for new streams</button>
-  </form>
+<div class="clips-refresh-bar" aria-label="Livestream intake">
   {% if refresh_message %}
-    <span class="clips-refresh-message{% if refresh_status == 'error' %} is-error{% endif %}" aria-live="polite">
+    <span class="clips-refresh-message{% if refresh_status == 'error' %} is-error{% endif %}" aria-live="polite" title="{{ refresh_message }}">
       {{ refresh_message }}
     </span>
   {% endif %}
-</section>
+  <form method="post" action="{{ url_path(request, '/actions/clips/refresh-streams') }}">
+    <button type="submit" class="clips-update-button" aria-label="Update clips from new streams">
+      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+        <path d="M20 11a8.1 8.1 0 0 0-14.9-4.3L3 9m0 0V4m0 5h5M4 13a8.1 8.1 0 0 0 14.9 4.3L21 15m0 0v5m0-5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      <span>Update</span>
+    </button>
+  </form>
+</div>
