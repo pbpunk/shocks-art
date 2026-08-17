@@ -1,21 +1,12 @@
-<section class="workspace-head">
-  <div>
-    <p class="eyebrow">Livestream intake</p>
-    <h1>Clips</h1>
-    <p class="muted">Check the Shocks Art channel for new streams and process anything waiting for extraction.</p>
-  </div>
-  <div class="actions">
-    <form method="post" action="{{ url_path(request, '/actions/clips/refresh-streams') }}">
-      <button type="submit">Check for new streams</button>
-    </form>
-  </div>
-</section>
-
 {% set refresh_status = request.query_params.get('refresh_status') %}
 {% set refresh_message = request.query_params.get('refresh_message') %}
-{% if refresh_message %}
-  <section class="notice {% if refresh_status == 'error' %}warning-notice{% endif %}" aria-live="polite">
-    <strong>{% if refresh_status == 'error' %}Stream check failed.{% else %}Stream check started.{% endif %}</strong>
-    <span>{{ refresh_message }}</span>
-  </section>
-{% endif %}
+<section class="clips-refresh-bar" aria-label="Livestream intake">
+  <form method="post" action="{{ url_path(request, '/actions/clips/refresh-streams') }}">
+    <button type="submit">Check for new streams</button>
+  </form>
+  {% if refresh_message %}
+    <span class="clips-refresh-message{% if refresh_status == 'error' %} is-error{% endif %}" aria-live="polite">
+      {{ refresh_message }}
+    </span>
+  {% endif %}
+</section>
