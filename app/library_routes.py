@@ -31,6 +31,12 @@ def local_redirect(request: Request, path: str, status_code: int = 303) -> Redir
 templates.env.globals["url_path"] = url_path
 
 
+@router.get("/health")
+def app_health():
+    """Cheap readiness endpoint used by the JARVIS app contract."""
+    return {"status": "ok", "app": "shocks-art"}
+
+
 @router.get("/library", response_class=HTMLResponse)
 def library_dashboard(
     request: Request,
