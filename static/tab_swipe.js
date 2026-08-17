@@ -1,6 +1,6 @@
 (() => {
   const tabLinks = [...document.querySelectorAll('nav a[data-app-tab]')];
-  if (tabLinks.length < 2 || !('ontouchstart' in window)) return;
+  if (tabLinks.length < 2) return;
 
   const normalizePath = (value) => {
     try {
@@ -20,6 +20,18 @@
     currentIndex = tabPaths.findIndex((path) => currentPath === `${path}/` || `${currentPath}/` === path);
   }
   if (currentIndex < 0) return;
+
+  tabLinks.forEach((link, index) => {
+    const isActive = index === currentIndex;
+    link.classList.toggle('active', isActive);
+    if (isActive) {
+      link.setAttribute('aria-current', 'page');
+    } else {
+      link.removeAttribute('aria-current');
+    }
+  });
+
+  if (!('ontouchstart' in window)) return;
 
   const interactiveSelector = 'a, button, input, select, textarea, video, iframe, [contenteditable="true"], [role="button"]';
   const minDistance = 70;
