@@ -9,7 +9,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Media
+from app.library_models import Media
 
 
 SUPPORTED_VIDEO_SUFFIXES = {".mp4", ".mov", ".m4v", ".mkv", ".webm", ".avi"}
