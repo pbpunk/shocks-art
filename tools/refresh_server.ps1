@@ -1,12 +1,11 @@
 $ErrorActionPreference = "Stop"
 
 $ProjectDir = Resolve-Path (Join-Path $PSScriptRoot "..")
-$AppUrl = "https://desktop.tail27cee7.ts.net/shocks_art/"
+$AppName = "Shocks Art"
 $Port = 8000
-$HealthUrls = @(
-    "http://127.0.0.1:$Port/shocks_art/",
-    "http://127.0.0.1:$Port/shocks_art/library"
-)
+$Route = "/shocks_art"
+$AppUrl = "https://desktop.tail27cee7.ts.net$Route/"
+$HealthUrl = "http://127.0.0.1:$Port$Route/health"
 
 function Write-Step {
     param([string]$Message)
@@ -51,6 +50,38 @@ function Test-IsShocksArtServerProcess {
         $Process.CommandLine -match "--port\s+$Port"
 }
 
+function Test-AppHealth {
+    try {
+        $Response = Invoke-WebRequest -UseBasicParsing $HealthUrl -TimeoutSec 2
+        return $Response.StatusCode -eq 200
+    } catch {
+        return $false
+    }
+}
+
+function Configure-TailscaleRoutes {
+    Write-Step "Configuring Tailscale routes"
+    $Target = "http://127.0.0.1:$Port"
+
+    try {
+        & tailscale.exe funnel --https=443 --set-path=$Route --bg --yes $Target
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Could not configure the public Funnel route. The healthy local app is still running."
+        }
+    } catch {
+        Write-Warning "Could not configure the public Funnel route: $($_.Exception.Message). The healthy local app is still running."
+    }
+
+    try {
+        & tailscale.exe serve --https=8443 --set-path=$Route --bg --yes $Target
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Could not configure the private tailnet route. The healthy local app is still running."
+        }
+    } catch {
+        Write-Warning "Could not configure the private tailnet route: $($_.Exception.Message). The healthy local app is still running."
+    }
+}
+
 Set-Location -LiteralPath $ProjectDir
 
 Write-Step "Pulling latest code"
@@ -66,14 +97,14 @@ $Branch = (git branch --show-current).Trim()
 $Commit = (git rev-parse --short HEAD).Trim()
 Write-Host "Running $Branch at $Commit"
 
-Write-Step "Stopping existing Shocks Art server"
+Write-Step "Stopping existing $AppName server"
 $ProcessIds = @()
 $ProcessIds += @(Get-ShocksArtServerProcess | Select-Object -ExpandProperty ProcessId)
 $PortListenerIds = @(Get-PortListenerProcessIds)
 $PortListeners = @(Get-PortListenerProcesses)
 foreach ($Listener in $PortListeners) {
     if (-not (Test-IsShocksArtServerProcess $Listener)) {
-        throw "Port $Port is in use by non-Shocks-Art PID $($Listener.ProcessId): $($Listener.CommandLine)"
+        throw "Port $Port is in use by non-$AppName PID $($Listener.ProcessId): $($Listener.CommandLine)"
     }
     $ProcessIds += $Listener.ProcessId
 }
@@ -90,7 +121,7 @@ $ProcessIds += $PortListenerIds
 $ProcessIds = @($ProcessIds | Where-Object { $_ } | Sort-Object -Unique)
 
 if ($ProcessIds.Count -eq 0) {
-    Write-Host "No existing Shocks Art server process found."
+    Write-Host "No existing $AppName server process found."
 } else {
     foreach ($ProcessId in $ProcessIds) {
         Write-Host "Stopping PID $ProcessId"
@@ -102,10 +133,10 @@ if ($ProcessIds.Count -eq 0) {
 $RemainingListeners = @(Get-PortListenerProcesses)
 if ($RemainingListeners.Count -gt 0) {
     $RemainingDescriptions = @($RemainingListeners | ForEach-Object { "PID $($_.ProcessId): $($_.CommandLine)" })
-    throw "Port $Port is still in use by $($RemainingDescriptions -join '; '). Stop it and run refresh again."
+    throw "Port $Port is still in use by $($RemainingDescriptions -join '; '). Stop it and run update again."
 }
 
-Write-Step "Starting Shocks Art server"
+Write-Step "Starting $AppName server"
 $LogDir = Join-Path $ProjectDir "data"
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 $StdOutLog = Join-Path $LogDir "server.out.log"
@@ -119,24 +150,11 @@ $Server = Start-Process -FilePath "py" `
     -RedirectStandardError $StdErrLog
 Write-Host "Started PID $($Server.Id)"
 
-Write-Step "Waiting for server"
+Write-Step "Waiting for health check"
 $Ready = $false
 for ($Attempt = 1; $Attempt -le 20; $Attempt++) {
     Start-Sleep -Seconds 1
-    $AllHealthy = $true
-    foreach ($HealthUrl in $HealthUrls) {
-        try {
-            $Response = Invoke-WebRequest -UseBasicParsing $HealthUrl -TimeoutSec 2
-            if ($Response.StatusCode -ne 200) {
-                $AllHealthy = $false
-                break
-            }
-        } catch {
-            $AllHealthy = $false
-            break
-        }
-    }
-    if ($AllHealthy) {
+    if (Test-AppHealth) {
         $Ready = $true
         break
     }
@@ -144,8 +162,10 @@ for ($Attempt = 1; $Attempt -le 20; $Attempt++) {
 }
 
 if (-not $Ready) {
-    throw "Server did not pass health checks within 20 seconds. Expected: $($HealthUrls -join ', '). Logs: $StdOutLog, $StdErrLog"
+    throw "Server did not pass its health check within 20 seconds. Expected: $HealthUrl. Logs: $StdOutLog, $StdErrLog"
 }
+
+Configure-TailscaleRoutes
 
 Write-Step "Opening app"
 Start-Process $AppUrl
