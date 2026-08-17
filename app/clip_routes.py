@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from app.core.database import SessionLocal, get_db
-from app.models import Stream
+from app.models import CandidateWindow, Stream
+from app.services.clip_new_state import read_new_clip_ids, replace_new_clip_ids
 from app.services.processing import discover_and_store_streams, process_queued_streams, summarize_exception
 
 
@@ -25,9 +26,17 @@ def local_redirect(request: Request, path: str, status_code: int = 303) -> Redir
 
 
 def process_stream_queue_background() -> None:
-    """Process queued/failed streams using a fresh DB session after the response returns."""
+    """Process queued/failed streams and advance the NEW batch only if clips are created."""
     with SessionLocal() as db:
+        before_ids = set(db.scalars(select(CandidateWindow.candidate_window_id)).all())
         process_queued_streams(db)
+        after_ids = set(db.scalars(select(CandidateWindow.candidate_window_id)).all())
+        replace_new_clip_ids(after_ids - before_ids)
+
+
+@router.get("/api/clips/new-state")
+def new_clip_state_api():
+    return {"candidate_window_ids": sorted(read_new_clip_ids())}
 
 
 @router.post("/actions/clips/refresh-streams")
