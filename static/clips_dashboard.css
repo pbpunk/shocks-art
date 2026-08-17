@@ -70,12 +70,36 @@
   gap: 6px;
   padding: 0 11px;
   font-size: 13px;
+  transition: border-color .15s ease, background-color .15s ease, color .15s ease, opacity .15s ease;
 }
 
 .clips-update-button svg {
   width: 16px;
   height: 16px;
   flex: 0 0 auto;
+}
+
+.clips-update-button.is-updating {
+  cursor: progress;
+  opacity: 1;
+}
+
+.clips-update-button.is-updating .clips-update-icon {
+  animation: clips-update-spin .85s linear infinite;
+}
+
+.clips-update-button.is-complete {
+  border-color: var(--accent);
+}
+
+.clips-update-button.is-failed {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: transparent;
+}
+
+@keyframes clips-update-spin {
+  to { transform: rotate(360deg); }
 }
 
 .clips-refresh-message {
