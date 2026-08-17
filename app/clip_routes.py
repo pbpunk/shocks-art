@@ -9,6 +9,7 @@ from starlette.requests import Request
 from app.core.database import SessionLocal, get_db
 from app.models import CandidateWindow, Stream
 from app.services.clip_new_state import read_new_clip_ids, replace_new_clip_ids
+from app.services.clip_update_state import read_clip_update_state, write_clip_update_state
 from app.services.processing import discover_and_store_streams, process_queued_streams, summarize_exception
 
 
@@ -26,17 +27,35 @@ def local_redirect(request: Request, path: str, status_code: int = 303) -> Redir
 
 
 def process_stream_queue_background() -> None:
-    """Process queued/failed streams and advance the NEW batch only if clips are created."""
+    """Process queued/failed streams, update NEW state, and publish progress."""
     with SessionLocal() as db:
         before_ids = set(db.scalars(select(CandidateWindow.candidate_window_id)).all())
-        process_queued_streams(db)
-        after_ids = set(db.scalars(select(CandidateWindow.candidate_window_id)).all())
-        replace_new_clip_ids(after_ids - before_ids)
+        try:
+            result = process_queued_streams(db)
+            after_ids = set(db.scalars(select(CandidateWindow.candidate_window_id)).all())
+            new_ids = after_ids - before_ids
+            replace_new_clip_ids(new_ids)
+            message = f"Update complete: {len(new_ids)} new clip(s) surfaced."
+            write_clip_update_state(
+                "complete",
+                message,
+                new_clips=len(new_ids),
+                attempted=result.get("attempted", 0),
+                complete=result.get("complete", 0),
+                failed=result.get("failed", 0),
+            )
+        except Exception as exc:
+            write_clip_update_state("failed", summarize_exception(exc))
 
 
 @router.get("/api/clips/new-state")
 def new_clip_state_api():
     return {"candidate_window_ids": sorted(read_new_clip_ids())}
+
+
+@router.get("/api/clips/update-state")
+def clip_update_state_api():
+    return read_clip_update_state()
 
 
 @router.post("/actions/clips/refresh-streams")
@@ -45,6 +64,7 @@ def refresh_streams_action(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
+    write_clip_update_state("checking", "Checking for new streams…")
     try:
         result = discover_and_store_streams(db)
         pending_count = db.scalar(
@@ -54,9 +74,16 @@ def refresh_streams_action(
         ) or 0
 
         if pending_count:
+            write_clip_update_state(
+                "processing",
+                f"Processing {pending_count} stream(s)…",
+                pending_streams=pending_count,
+            )
             background_tasks.add_task(process_stream_queue_background)
             processing_message = f" {pending_count} stream(s) queued for processing."
         else:
+            message = "Up to date — no streams are waiting to process."
+            write_clip_update_state("complete", message, new_clips=0, pending_streams=0)
             processing_message = " Nothing new is waiting to process."
 
         message = (
@@ -67,7 +94,9 @@ def refresh_streams_action(
         )
         query = urlencode({"refresh_status": "success", "refresh_message": message})
     except Exception as exc:
-        query = urlencode({"refresh_status": "error", "refresh_message": summarize_exception(exc)})
+        error_message = summarize_exception(exc)
+        write_clip_update_state("failed", error_message)
+        query = urlencode({"refresh_status": "error", "refresh_message": error_message})
 
     return local_redirect(request, f"/?{query}")
 
