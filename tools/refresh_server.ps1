@@ -22,6 +22,12 @@ function Get-ShocksArtServerProcess {
         }
 }
 
+function Get-PortListenerProcesses {
+    foreach ($ProcessId in Get-PortListenerProcessIds) {
+        Get-CimInstance Win32_Process -Filter "ProcessId=$ProcessId"
+    }
+}
+
 function Get-PortListenerProcessIds {
     try {
         return @(
@@ -33,10 +39,26 @@ function Get-PortListenerProcessIds {
     }
 }
 
+function Get-ChildProcesses {
+    param([array]$ParentProcessIds)
+    Get-CimInstance Win32_Process |
+        Where-Object { $ParentProcessIds -contains $_.ParentProcessId }
+}
+
+function Test-IsShocksArtServerProcess {
+    param($Process)
+    return $Process.CommandLine -match "uvicorn\s+app\.main:app" -and
+        $Process.CommandLine -match "--port\s+$Port"
+}
+
 Set-Location -LiteralPath $ProjectDir
 
 Write-Step "Pulling latest code"
-git pull --ff-only
+git fetch origin main --prune
+if ($LASTEXITCODE -ne 0) {
+    throw "git fetch failed. Resolve the Git message above, then run this script again."
+}
+git pull --ff-only origin main
 if ($LASTEXITCODE -ne 0) {
     throw "git pull failed. Resolve the Git message above, then run this script again."
 }
@@ -47,7 +69,24 @@ Write-Host "Running $Branch at $Commit"
 Write-Step "Stopping existing Shocks Art server"
 $ProcessIds = @()
 $ProcessIds += @(Get-ShocksArtServerProcess | Select-Object -ExpandProperty ProcessId)
-$ProcessIds += @(Get-PortListenerProcessIds)
+$PortListenerIds = @(Get-PortListenerProcessIds)
+$PortListeners = @(Get-PortListenerProcesses)
+foreach ($Listener in $PortListeners) {
+    if (-not (Test-IsShocksArtServerProcess $Listener)) {
+        throw "Port $Port is in use by non-Shocks-Art PID $($Listener.ProcessId): $($Listener.CommandLine)"
+    }
+    $ProcessIds += $Listener.ProcessId
+}
+$PortListenerChildren = @(Get-ChildProcesses $PortListenerIds)
+foreach ($Child in $PortListenerChildren) {
+    if (
+        $Child.ExecutablePath -like "*Python313\python.exe" -and
+        $Child.CommandLine -match "multiprocessing\.spawn"
+    ) {
+        $ProcessIds += $Child.ProcessId
+    }
+}
+$ProcessIds += $PortListenerIds
 $ProcessIds = @($ProcessIds | Where-Object { $_ } | Sort-Object -Unique)
 
 if ($ProcessIds.Count -eq 0) {
@@ -60,14 +99,25 @@ if ($ProcessIds.Count -eq 0) {
     Start-Sleep -Seconds 2
 }
 
-$RemainingListeners = @(Get-PortListenerProcessIds)
+$RemainingListeners = @(Get-PortListenerProcesses)
 if ($RemainingListeners.Count -gt 0) {
-    throw "Port $Port is still in use by PID(s): $($RemainingListeners -join ', '). Stop them and run refresh again."
+    $RemainingDescriptions = @($RemainingListeners | ForEach-Object { "PID $($_.ProcessId): $($_.CommandLine)" })
+    throw "Port $Port is still in use by $($RemainingDescriptions -join '; '). Stop it and run refresh again."
 }
 
 Write-Step "Starting Shocks Art server"
-$ServerCommand = 'cd /d "' + $ProjectDir + '" && py -3.13 -m uvicorn app.main:app --host 127.0.0.1 --port ' + $Port
-Start-Process -FilePath "cmd.exe" -ArgumentList "/k", $ServerCommand -WorkingDirectory $ProjectDir
+$LogDir = Join-Path $ProjectDir "data"
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+$StdOutLog = Join-Path $LogDir "server.out.log"
+$StdErrLog = Join-Path $LogDir "server.err.log"
+$Server = Start-Process -FilePath "py" `
+    -ArgumentList @("-3.13", "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", $Port) `
+    -WorkingDirectory $ProjectDir `
+    -PassThru `
+    -WindowStyle Hidden `
+    -RedirectStandardOutput $StdOutLog `
+    -RedirectStandardError $StdErrLog
+Write-Host "Started PID $($Server.Id)"
 
 Write-Step "Waiting for server"
 $Ready = $false
@@ -94,7 +144,7 @@ for ($Attempt = 1; $Attempt -le 20; $Attempt++) {
 }
 
 if (-not $Ready) {
-    throw "Server did not pass health checks within 20 seconds. Check the new server window. Expected: $($HealthUrls -join ', ')"
+    throw "Server did not pass health checks within 20 seconds. Expected: $($HealthUrls -join ', '). Logs: $StdOutLog, $StdErrLog"
 }
 
 Write-Step "Opening app"
