@@ -1,0 +1,291 @@
+<section class="public-head">
+  <h1>Shocks Art Clips</h1>
+  <p>{{ candidates|length }} livestream clips</p>
+</section>
+
+<section class="public-controls" aria-label="Clip controls">
+  <div class="public-filters" aria-label="Clip filters">
+    <button type="button" class="favorite-filter active" data-filter="all">All</button>
+    <button type="button" class="favorite-filter" data-filter="favorites">Favorites</button>
+    <button type="button" class="favorite-filter" data-filter="not-favorites" aria-label="Show clips that are not favorited">Not Favorite</button>
+  </div>
+  <div class="public-sort" aria-label="Clip sorting">
+    <button type="button" class="sort-chip active" data-sort-key="rating" data-direction="desc" aria-label="Sort by rating descending" aria-pressed="true">
+      Rating <span aria-hidden="true">↓</span>
+    </button>
+    <button type="button" class="sort-chip" data-sort-key="published" data-direction="desc" aria-label="Sort by date descending" aria-pressed="false">
+      Date <span aria-hidden="true">↓</span>
+    </button>
+  </div>
+</section>
+
+<p class="public-filter-empty" hidden>No clips match this filter.</p>
+
+<section class="public-clip-grid">
+  {% for candidate in candidates %}
+    {% set download_assets = candidate.derived_assets | selectattr("asset_type", "equalto", "source_clip_mp4") | list %}
+    {% set download_state = download_assets[0].creation_status if download_assets else "missing" %}
+    <article class="public-clip" data-candidate-id="{{ candidate.candidate_window_id }}" data-favorite="{{ 'true' if candidate.is_favorite else 'false' }}" data-score="{{ candidate.weighted_score }}" data-published="{{ candidate.stream.published_at }}" data-original-order="{{ loop.index }}" data-favorite-url="{{ url_path(request, '/api/clips/' ~ candidate.candidate_window_id ~ '/favorite') }}">
+      <button type="button" class="public-video public-video-link" data-video-id="{{ candidate.stream.source_video_id }}" data-start="{{ candidate.start_seconds }}" data-title="{{ candidate.title }}" aria-label="Play {{ candidate.title }} on this page">
+        <img src="https://i.ytimg.com/vi/{{ candidate.stream.source_video_id }}/hqdefault.jpg" alt="{{ candidate.stream.title }} thumbnail" loading="{{ 'eager' if loop.index <= 3 else 'lazy' }}">
+        <span class="public-play" aria-hidden="true"></span>
+      </button>
+
+      <div class="public-copy">
+        <div class="public-title-row">
+          <h2>{{ candidate.title }}</h2>
+          <p class="public-source">{{ candidate.stream.title }}</p>
+          {% if candidate.review_status == "needs_verification" %}
+            <span class="public-check">Human Review Required</span>
+          {% endif %}
+        </div>
+        <div class="public-timing">
+          <div class="public-rating">
+            <strong>{{ "%.0f"|format(candidate.weighted_score) }}</strong>
+            <span>rating</span>
+          </div>
+          <div class="public-timecode">
+            <strong>{{ candidate.start_timestamp }}-{{ candidate.end_timestamp }}</strong>
+            <a href="{{ candidate.stream.url }}&t={{ candidate.start_seconds }}s" target="_blank" rel="noreferrer">Open at timestamp</a>
+          </div>
+          <button type="button" class="favorite-heart{% if candidate.is_favorite %} hearted{% endif %}" aria-label="{% if candidate.is_favorite %}Unheart clip{% else %}Heart clip{% endif %}" aria-pressed="{{ 'true' if candidate.is_favorite else 'false' }}">
+            <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+              <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.08C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35Z"></path>
+            </svg>
+          </button>
+        </div>
+        <button
+          type="button"
+          class="clip-download-button"
+          data-download-state="{{ download_state }}"
+          data-status-url="{{ url_path(request, '/api/clips/' ~ candidate.candidate_window_id ~ '/download-status') }}"
+          data-generate-url="{{ url_path(request, '/api/clips/' ~ candidate.candidate_window_id ~ '/generate-download') }}"
+          data-download-url="{{ url_path(request, '/api/clips/' ~ candidate.candidate_window_id ~ '/download') }}"
+          style="--download-progress: {% if download_state == 'complete' %}100{% elif download_state == 'processing' %}1{% else %}0{% endif %}%;"
+        >
+          <span>{% if download_state == "complete" %}Download{% elif download_state == "processing" %}Generating...{% elif download_state == "failed" %}Try Again{% else %}Generate Download{% endif %}</span>
+        </button>
+        <div class="public-meta">
+          <span>{{ candidate.duration_seconds }} seconds</span>
+          <span>{{ candidate.primary_pillar.replace("_", " ") }}</span>
+          {% if candidate.review_status == "needs_verification" %}
+            <span>needs quick check</span>
+          {% endif %}
+        </div>
+        <p>{{ candidate.concise_summary }}</p>
+        {% if candidate.possible_hooks %}
+          <p><strong>Possible opener:</strong> {{ candidate.possible_hooks[0] }}</p>
+        {% endif %}
+        {% if candidate.transcript_excerpt %}
+          <blockquote>{{ candidate.transcript_excerpt }}</blockquote>
+        {% endif %}
+      </div>
+    </article>
+  {% else %}
+    <div class="empty-state">
+      <h2>No clips yet</h2>
+      <p>No active structured clips are available.</p>
+    </div>
+  {% endfor %}
+</section>
+
+<script>
+  const videoButtons = [...document.querySelectorAll(".public-video-link")];
+  const favoriteButtons = [...document.querySelectorAll(".favorite-heart")];
+  const downloadButtons = [...document.querySelectorAll(".clip-download-button")];
+  const filterButtons = [...document.querySelectorAll(".favorite-filter")];
+  const sortButtons = [...document.querySelectorAll(".sort-chip")];
+  const clipGrid = document.querySelector(".public-clip-grid");
+  const emptyFilterMessage = document.querySelector(".public-filter-empty");
+
+  function setHeart(button, isFavorite) {
+    const card = button.closest(".public-clip");
+    card.dataset.favorite = String(isFavorite);
+    button.classList.toggle("hearted", isFavorite);
+    button.setAttribute("aria-pressed", String(isFavorite));
+    button.setAttribute("aria-label", isFavorite ? "Unheart clip" : "Heart clip");
+  }
+
+  function playInline(button) {
+    if (!button || button.querySelector("iframe")) return;
+    const iframe = document.createElement("iframe");
+    iframe.src = `https://www.youtube-nocookie.com/embed/${button.dataset.videoId}?start=${button.dataset.start}&autoplay=1&rel=0`;
+    iframe.title = button.dataset.title || "YouTube video";
+    iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share";
+    iframe.allowFullscreen = true;
+    iframe.loading = "lazy";
+    button.replaceChildren(iframe);
+    button.classList.add("is-playing");
+    button.setAttribute("aria-label", "Video player loaded");
+  }
+
+  function sortCards() {
+    const activeSort = document.querySelector(".sort-chip.active");
+    const key = activeSort?.dataset.sortKey || "rating";
+    const direction = activeSort?.dataset.direction || "desc";
+    const multiplier = direction === "asc" ? 1 : -1;
+    const cards = [...document.querySelectorAll(".public-clip")];
+    cards.sort((a, b) => {
+      const aValue = key === "published" ? Date.parse(a.dataset.published || "") : Number(a.dataset.score || 0);
+      const bValue = key === "published" ? Date.parse(b.dataset.published || "") : Number(b.dataset.score || 0);
+      const valueDiff = ((aValue || 0) - (bValue || 0)) * multiplier;
+      if (valueDiff !== 0) return valueDiff;
+      return Number(a.dataset.originalOrder || 0) - Number(b.dataset.originalOrder || 0);
+    });
+    cards.forEach((card) => clipGrid.appendChild(card));
+  }
+
+  function updateSortLabels() {
+    sortButtons.forEach((button) => {
+      const arrow = button.dataset.direction === "asc" ? "↑" : "↓";
+      const label = button.dataset.sortKey === "published" ? "date" : "rating";
+      const direction = button.dataset.direction === "asc" ? "ascending" : "descending";
+      button.querySelector("span").textContent = arrow;
+      button.setAttribute("aria-pressed", String(button.classList.contains("active")));
+      button.setAttribute("aria-label", `Sort by ${label} ${direction}`);
+    });
+  }
+
+  function applyFavoriteFilter(filter) {
+    let visibleCount = 0;
+    document.querySelectorAll(".public-clip").forEach((card) => {
+      const isFavorite = card.dataset.favorite === "true";
+      const show =
+        filter === "all" ||
+        (filter === "favorites" && isFavorite) ||
+        (filter === "not-favorites" && !isFavorite);
+      card.hidden = !show;
+      card.classList.toggle("is-filtered-out", !show);
+      card.style.display = show ? "" : "none";
+      if (show) visibleCount += 1;
+    });
+    if (emptyFilterMessage) {
+      emptyFilterMessage.hidden = visibleCount !== 0;
+    }
+  }
+
+  function setDownloadState(button, status, progress = null) {
+    button.dataset.downloadState = status;
+    button.disabled = false;
+    button.setAttribute("aria-disabled", String(status === "processing"));
+    const normalizedProgress = progress === null ? (status === "ready" || status === "complete" ? 100 : 0) : Number(progress || 0);
+    button.style.setProperty("--download-progress", `${Math.max(0, Math.min(100, normalizedProgress))}%`);
+    button.classList.toggle("is-processing", status === "processing");
+    button.classList.toggle("is-ready", status === "ready" || status === "complete");
+    button.classList.toggle("is-failed", status === "failed");
+    if (status === "ready" || status === "complete") {
+      button.querySelector("span").textContent = "Download";
+      button.disabled = false;
+    } else if (status === "processing") {
+      button.querySelector("span").textContent = "Generating...";
+    } else if (status === "failed") {
+      button.querySelector("span").textContent = "Try Again";
+      button.disabled = false;
+    } else {
+      button.querySelector("span").textContent = "Generate Download";
+      button.disabled = false;
+    }
+  }
+
+  async function refreshDownloadStatus(button) {
+    const response = await fetch(button.dataset.statusUrl);
+    if (!response.ok) throw new Error("Download status failed");
+    const result = await response.json();
+    setDownloadState(button, result.status, result.progress);
+    return result.status;
+  }
+
+  function pollDownloadStatus(button) {
+    window.setTimeout(async () => {
+      try {
+        const status = await refreshDownloadStatus(button);
+        if (status === "processing") {
+          pollDownloadStatus(button);
+        }
+      } catch {
+        setDownloadState(button, "failed");
+      }
+    }, 2500);
+  }
+
+  favoriteButtons.forEach((button) => {
+    button.addEventListener("click", async () => {
+      const card = button.closest(".public-clip");
+      button.disabled = true;
+      try {
+        const response = await fetch(card.dataset.favoriteUrl, { method: "POST" });
+        if (!response.ok) throw new Error("Favorite update failed");
+        const result = await response.json();
+        setHeart(button, Boolean(result.is_favorite));
+      } catch {
+        button.classList.add("favorite-error");
+        window.setTimeout(() => button.classList.remove("favorite-error"), 1200);
+      } finally {
+        button.disabled = false;
+      }
+      const activeFilter = document.querySelector(".favorite-filter.active")?.dataset.filter || "all";
+      applyFavoriteFilter(activeFilter);
+    });
+  });
+
+  downloadButtons.forEach((button) => {
+    if (button.dataset.downloadState === "processing") {
+      setDownloadState(button, "processing", Number.parseFloat(button.style.getPropertyValue("--download-progress")) || 1);
+      pollDownloadStatus(button);
+    } else {
+      setDownloadState(button, button.dataset.downloadState, Number.parseFloat(button.style.getPropertyValue("--download-progress")) || 0);
+    }
+    button.addEventListener("click", async () => {
+      const state = button.dataset.downloadState;
+      if (state === "ready" || state === "complete") {
+        window.location.href = button.dataset.downloadUrl;
+        return;
+      }
+      setDownloadState(button, "processing", 1);
+      try {
+        const response = await fetch(button.dataset.generateUrl, { method: "POST" });
+        if (!response.ok) throw new Error("Download generation failed");
+        const result = await response.json();
+        setDownloadState(button, result.status, result.progress);
+        if (result.status === "ready") {
+          window.location.href = button.dataset.downloadUrl;
+        } else if (result.status === "processing") {
+          pollDownloadStatus(button);
+        }
+      } catch {
+        setDownloadState(button, "failed");
+      }
+    });
+  });
+
+  videoButtons.forEach((button) => {
+    button.addEventListener("click", () => playInline(button));
+  });
+
+  filterButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      filterButtons.forEach((item) => item.classList.remove("active"));
+      button.classList.add("active");
+      applyFavoriteFilter(button.dataset.filter);
+    });
+  });
+
+  sortButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (button.classList.contains("active")) {
+        button.dataset.direction = button.dataset.direction === "asc" ? "desc" : "asc";
+      } else {
+        sortButtons.forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+      }
+      updateSortLabels();
+      sortCards();
+      const activeFilter = document.querySelector(".favorite-filter.active")?.dataset.filter || "all";
+      applyFavoriteFilter(activeFilter);
+    });
+  });
+
+  updateSortLabels();
+  sortCards();
+  applyFavoriteFilter("all");
+</script>

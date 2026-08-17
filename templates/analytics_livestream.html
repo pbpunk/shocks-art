@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block content %}
+{% set summary = detail.summary %}
+<section class="workspace-head">
+  <div>
+    <p class="eyebrow">Livestream Analytics</p>
+    <h1>{{ summary.title }}</h1>
+    <p class="muted">
+      {{ summary.published_at[:10] }}
+      {% if summary.actual_start %} / actual start {{ summary.actual_start }}{% endif %}
+      {% if detail.stream %} / linked to stream intelligence{% endif %}
+    </p>
+  </div>
+  <div class="actions">
+    <a class="button secondary" href="{{ url_path(request, '/analytics') }}">Analytics</a>
+    {% if detail.stream %}<a class="button secondary" href="{{ detail.stream.url }}">Open YouTube</a>{% endif %}
+  </div>
+</section>
+
+<section class="analytics-live-detail">
+  <div class="analytics-thumbnail">
+    {% if summary.thumbnail %}
+      <img src="{{ summary.thumbnail }}" alt="">
+    {% else %}
+      <div class="video-placeholder"><strong>No thumbnail</strong></div>
+    {% endif %}
+  </div>
+  <div class="metrics analytics-metrics">
+    <div><span>{{ summary.total_views|int }}</span><small>total views</small></div>
+    <div><span>{{ summary.live_views|int }}</span><small>live views</small></div>
+    <div><span>{{ summary.replay_views|int }}</span><small>replay views</small></div>
+    <div><span>${{ "%.2f"|format(summary.estimated_revenue) }}</span><small>estimated revenue</small></div>
+    <div><span>{{ "%.1f"|format(summary.average_concurrent_viewers) }}</span><small>average concurrent</small></div>
+    <div><span>{{ summary.peak_concurrent_viewers|int }}</span><small>peak concurrent</small></div>
+  </div>
+</section>
+
+<section class="analytics-grid analytics-live-kpis">
+  <article class="analytics-panel">
+    <h2>Performance</h2>
+    <dl class="analytics-definition-list">
+      <div><dt>Watch hours</dt><dd>{{ "%.1f"|format(summary.watch_minutes / 60) }}</dd></div>
+      <div><dt>Likes</dt><dd>{{ summary.likes|int }}</dd></div>
+      <div><dt>Subscribers gained</dt><dd>{{ summary.subscribers_gained|int }}</dd></div>
+      <div><dt>Subscribers lost</dt><dd>{{ summary.subscribers_lost|int }}</dd></div>
+    </dl>
+  </article>
+  <article class="analytics-panel">
+    <h2>Timing</h2>
+    <dl class="analytics-definition-list">
+      <div><dt>Scheduled start</dt><dd>{{ summary.scheduled_start or "Unavailable" }}</dd></div>
+      <div><dt>Actual start</dt><dd>{{ summary.actual_start or "Unavailable" }}</dd></div>
+      <div><dt>Actual end</dt><dd>{{ summary.actual_end or "Unavailable" }}</dd></div>
+      <div><dt>Duration seconds</dt><dd>{{ summary.duration_seconds|int }}</dd></div>
+    </dl>
+  </article>
+</section>
+
+<section class="analytics-panel runs-panel">
+  <div class="section-head">
+    <h2>Concurrent Viewer Timeline</h2>
+    <span class="muted">{{ detail.timeseries|length }} stored points</span>
+  </div>
+  <canvas class="analytics-chart analytics-wide-chart" id="concurrency-chart"></canvas>
+  {% if detail.has_content_intelligence %}
+    <p class="muted">This stream has transcript/content intelligence records, so future overlays can join by video ID and stream position.</p>
+  {% else %}
+    <p class="muted">No transcript/content intelligence is linked yet, but analytics points are stored by video ID and stream position for future overlays.</p>
+  {% endif %}
+</section>
+
+<section class="notice warning-notice">
+  <strong>Historical live chat and monetized chat events are not backfilled.</strong>
+  <span>The schema can capture live chat, Super Chats, memberships, and similar events prospectively later, but this view does not fabricate unavailable history.</span>
+</section>
+
+<script id="concurrency-data" type="application/json">{{ detail.timeseries|tojson }}</script>
+<script>
+(() => {
+  const points = JSON.parse(document.getElementById("concurrency-data").textContent || "[]");
+  const canvas = document.getElementById("concurrency-chart");
+  const color = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#5cc39d";
+  function draw() {
+    const ctx = canvas.getContext("2d");
+    const width = canvas.clientWidth;
+    const height = 260;
+    canvas.width = Math.max(320, width * devicePixelRatio);
+    canvas.height = height * devicePixelRatio;
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+    ctx.clearRect(0, 0, width, height);
+    if (!points.length) {
+      ctx.fillStyle = "#9aa8a1";
+      ctx.fillText("No concurrency timeline synced", 16, 32);
+      return;
+    }
+    const values = points.map(point => Number(point.concurrent_viewers || 0));
+    const max = Math.max(...values, 1);
+    const step = points.length > 1 ? (width - 28) / (points.length - 1) : 0;
+    ctx.strokeStyle = "#2d3733";
+    for (let i = 0; i < 5; i++) {
+      const y = 18 + i * 54;
+      ctx.beginPath();
+      ctx.moveTo(14, y);
+      ctx.lineTo(width - 14, y);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    values.forEach((value, index) => {
+      const x = 14 + index * step;
+      const y = height - 18 - (value / max) * (height - 42);
+      if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+  draw();
+  window.addEventListener("resize", draw);
+})();
+</script>
+{% endblock %}

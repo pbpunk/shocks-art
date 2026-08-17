@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="workspace-head">
+  <div>
+    <p class="eyebrow">Archive extraction</p>
+    <h1>Livestream Pipeline</h1>
+    <p class="muted">Shocks Art streams move from archive intake to Gemini extraction, ranked candidate review, and export.</p>
+  </div>
+  <div class="actions">
+    <form method="post" action="{{ url_path(request, '/actions/discover') }}"><button type="submit">Refresh Archive</button></form>
+    <form method="post" action="{{ url_path(request, '/actions/process-one') }}">
+      <button type="submit" {% if active_runs %}disabled{% endif %}>
+        {% if active_runs %}Extraction Running...{% else %}Extract Next Stream{% endif %}
+      </button>
+    </form>
+    <a class="button secondary" href="{{ url_path(request, '/') }}">Clips</a>
+    <a class="button secondary" href="{{ url_path(request, '/candidates') }}">Review Candidates</a>
+  </div>
+</section>
+
+{% if archive_message %}
+  <section class="notice {% if archive_status == 'error' %}warning-notice{% endif %}" aria-live="polite">
+    <strong>{% if archive_status == 'error' %}Archive refresh failed.{% else %}Archive refresh complete.{% endif %}</strong>
+    <span>{{ archive_message }}</span>
+  </section>
+{% endif %}
+
+{% if active_runs %}
+  <section class="active-run" aria-live="polite">
+    <div class="spinner" aria-hidden="true"></div>
+    <div>
+      <h2>Analyzing {{ active_runs[0].stream.title }}</h2>
+      <p>Gemini is reviewing the livestream and selecting one source window. This page refreshes every 8 seconds while extraction is running.</p>
+    </div>
+  </section>
+{% endif %}
+
+{% if needs_verification_count %}
+  <section class="notice warning-notice">
+    <strong>{{ needs_verification_count }} candidate windows need manual verification.</strong>
+    <span>They were generated before the video-access probe was added or have reviewer-flagged evidence. Verify in YouTube/native Gemini before using them.</span>
+  </section>
+{% endif %}
+
+<section class="metrics">
+  <div><span>{{ stream_count }}</span><small>archive streams</small></div>
+  <div><span>{{ statuses.get("queued", 0) }}</span><small>awaiting extraction</small></div>
+  <div><span>{{ statuses.get("processing", 0) }}</span><small>in progress</small></div>
+  <div><span>{{ candidate_count }}</span><small>ranked windows</small></div>
+  <div><span>{{ statuses.get("failed", 0) + statuses.get("quarantined", 0) }}</span><small>needs attention</small></div>
+  <div><span>{{ approved_count }}</span><small>approved</small></div>
+</section>
+
+<section class="split">
+  <div>
+    <div class="section-head">
+      <h2>Archive Status</h2>
+      <span class="muted">{{ settings.gemini_model }} / prompt {{ settings.prompt_version }}</span>
+    </div>
+    <div class="table">
+      <div class="table-row table-head">
+        <span>Stream</span>
+        <span>Status</span>
+        <span>Published</span>
+      </div>
+      {% for stream in recent_streams %}
+        <div class="table-row">
+          <span><a href="{{ stream.url }}">{{ stream.title }}</a></span>
+          <span><mark class="status {{ stream.processing_status }}">{{ stream.processing_status }}</mark></span>
+          <span>{{ stream.published_at[:10] }}</span>
+        </div>
+      {% else %}
+        <div class="empty">No streams discovered yet.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div>
+    <div class="section-head">
+      <h2>Top Candidates</h2>
+      <a href="{{ url_path(request, '/candidates') }}">View all</a>
+    </div>
+    <div class="stack">
+      {% for candidate in top_candidates %}
+        <article class="compact-candidate">
+          <div>
+            <h3>{{ candidate.title }}</h3>
+            <p>{{ candidate.stream.title }}</p>
+            <p class="muted">{{ candidate.start_timestamp }}-{{ candidate.end_timestamp }} / {{ candidate.primary_pillar }}</p>
+          </div>
+          <strong>{{ "%.1f"|format(candidate.weighted_score) }}</strong>
+        </article>
+      {% else %}
+        <div class="empty">No extracted candidates yet.</div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
+<section class="runs-panel">
+  <div class="section-head">
+    <h2>Recent Extraction Runs</h2>
+    <span class="muted">Every attempt keeps its status and error reason.</span>
+  </div>
+  <div class="table">
+    <div class="table-row runs-head">
+      <span>Stream</span>
+      <span>Run Status</span>
+      <span>Model</span>
+      <span>Result</span>
+    </div>
+    {% for run in recent_runs %}
+      <div class="table-row runs-row">
+        <span>{{ run.stream.title }}</span>
+        <span><mark class="status {{ run.status }}">{{ run.status }}</mark></span>
+        <span>{{ run.model }}</span>
+        <span>
+          {% if run.exception_message %}
+            <strong class="error-text">{{ run.exception_message }}</strong>
+          {% elif run.status == "complete" %}
+            Candidate saved
+          {% elif run.status == "processing" %}
+            Working...
+          {% else %}
+            Waiting for response
+          {% endif %}
+        </span>
+      </div>
+    {% else %}
+      <div class="empty">No extraction runs yet.</div>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

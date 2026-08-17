@@ -1,0 +1,35 @@
+# Local configuration and secrets
+.env
+*.local
+
+# Python caches and build metadata
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Runtime data, generated assets, logs, and local browser profiles
+data/*
+!data/.gitkeep
+*.log
+
+# Codex/local attachments
+.codex-remote-attachments/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

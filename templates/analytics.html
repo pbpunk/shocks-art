@@ -1,0 +1,223 @@
+{% extends "base.html" %}
+{% block content %}
+{% set totals = overview.totals %}
+{% set forecasts = overview.forecasts %}
+{% set connection = overview.connection %}
+<section class="workspace-head">
+  <div>
+    <p class="eyebrow">YouTube Analytics</p>
+    <h1>Analytics</h1>
+    <p class="muted">
+      {% if connection.connected %}
+        Connected to {{ connection.channel_title or connection.channel_id }}.
+        {% if connection.latest_sync %}Last sync: {{ connection.latest_sync.status }}{% if connection.latest_sync.completed_at %} at {{ connection.latest_sync.completed_at }}{% endif %}.{% endif %}
+      {% else %}
+        Connect YouTube Analytics to backfill channel performance from {{ settings.youtube_analytics_backfill_start }}.
+      {% endif %}
+    </p>
+  </div>
+  <div class="actions">
+    <form class="filters" method="get" action="{{ url_path(request, '/analytics') }}">
+      <input type="date" name="start_date" value="{{ overview.start_date }}">
+      <input type="date" name="end_date" value="{{ overview.end_date }}">
+      <button class="button secondary" type="submit">Apply</button>
+    </form>
+    {% if connection.connected %}
+      <form method="post" action="{{ url_path(request, '/actions/analytics/sync-youtube') }}"><button type="submit">Sync YouTube</button></form>
+      <form method="post" action="{{ url_path(request, '/actions/analytics/refresh-channels') }}"><button class="button secondary" type="submit">Refresh Channels</button></form>
+      <a class="button secondary" href="{{ url_path(request, '/analytics/connect/youtube') }}">Switch Account / Channel</a>
+    {% else %}
+      <a class="button" href="{{ url_path(request, '/analytics/connect/youtube') }}">Connect YouTube</a>
+    {% endif %}
+  </div>
+</section>
+
+{% if connection.connected %}
+  <section class="notice analytics-channel-switcher">
+    <strong>Analytics channel</strong>
+    <span>{{ connection.channel_title or connection.channel_id }}</span>
+    {% if connection.available_channels %}
+      <form method="post" action="{{ url_path(request, '/actions/analytics/select-channel') }}">
+        <select name="channel_id" aria-label="Analytics channel">
+          {% for channel in connection.available_channels %}
+            <option value="{{ channel.id }}" {% if channel.id == connection.channel_id %}selected{% endif %}>{{ channel.title or channel.id }}</option>
+          {% endfor %}
+        </select>
+        <button class="button secondary" type="submit">Use Channel</button>
+      </form>
+    {% else %}
+      <form method="post" action="{{ url_path(request, '/actions/analytics/refresh-channels') }}">
+        <button class="button secondary" type="submit">Find Managed Channels</button>
+      </form>
+    {% endif %}
+  </section>
+{% endif %}
+
+<section class="notice analytics-import-panel">
+  <div>
+    <strong>Import YouTube Studio CSV</strong>
+    <span>Use exported analytics until owner OAuth is available. Daily/video CSVs populate KPIs; livestream timeline CSVs populate concurrency when exported.</span>
+  </div>
+  <form method="post" action="{{ url_path(request, '/actions/analytics/import-csv') }}" enctype="multipart/form-data">
+    <select name="import_type" aria-label="CSV import type">
+      <option value="daily">Daily / video analytics</option>
+      <option value="livestream_timeseries">Livestream concurrency timeline</option>
+    </select>
+    <input type="file" name="csv_file" accept=".csv,text/csv" required>
+    <button class="button secondary" type="submit">Import CSV</button>
+  </form>
+</section>
+
+{% if analytics_message %}
+  <section class="notice {% if analytics_status == 'error' %}warning-notice{% endif %}" aria-live="polite">
+    <strong>{% if analytics_status == 'error' %}Analytics action failed.{% else %}Analytics update.{% endif %}</strong>
+    <span>{{ analytics_message }}</span>
+  </section>
+{% endif %}
+
+{% if connection.latest_sync and connection.latest_sync.error_message %}
+  <section class="notice warning-notice">
+    <strong>Last sync failed.</strong>
+    <span>{{ connection.latest_sync.error_message }}</span>
+  </section>
+{% endif %}
+
+<section class="metrics analytics-metrics">
+  <div><span>${{ "%.2f"|format(totals.estimated_revenue) }}</span><small>estimated revenue</small></div>
+  <div><span>${{ "%.2f"|format(forecasts.mtd_run_rate or 0) }}</span><small>projected month-end revenue</small></div>
+  <div><span>{{ totals.views|int }}</span><small>views</small></div>
+  <div><span>{{ "%.1f"|format(totals.watch_hours) }}</span><small>watch hours</small></div>
+  <div><span>{{ totals.subscriber_net|int }}</span><small>subscriber net</small></div>
+  <div><span>${{ "%.2f"|format(totals.rpm) }}</span><small>revenue per 1,000 views</small></div>
+</section>
+
+<section class="analytics-grid">
+  <article class="analytics-panel">
+    <div class="section-head"><h2>Daily Revenue</h2><span class="muted">Stored analytics</span></div>
+    <canvas class="analytics-chart" data-series="revenue"></canvas>
+  </article>
+  <article class="analytics-panel">
+    <div class="section-head"><h2>Daily Views</h2><span class="muted">Stored analytics</span></div>
+    <canvas class="analytics-chart" data-series="views"></canvas>
+  </article>
+  <article class="analytics-panel">
+    <div class="section-head"><h2>Subscriber Change</h2><span class="muted">Net daily</span></div>
+    <canvas class="analytics-chart" data-series="subscriber_net"></canvas>
+  </article>
+  <article class="analytics-panel">
+    <div class="section-head"><h2>Watch Time</h2><span class="muted">Minutes</span></div>
+    <canvas class="analytics-chart" data-series="watch_minutes"></canvas>
+  </article>
+</section>
+
+<section class="split analytics-split">
+  <div>
+    <div class="section-head">
+      <h2>Content Type Performance</h2>
+      <span class="muted">Shorts, livestreams, and VOD</span>
+    </div>
+    <div class="table analytics-table">
+      <div class="table-row analytics-content-row table-head">
+        <span>Type</span><span>Views</span><span>Watch hours</span><span>Subs</span><span>Revenue</span><span>RPM</span>
+      </div>
+      {% for row in overview.content_types %}
+        <div class="table-row analytics-content-row">
+          <span>{{ row.content_type|upper }}</span>
+          <span>{{ row.views|int }}</span>
+          <span>{{ "%.1f"|format(row.watch_hours) }}</span>
+          <span>{{ row.subscriber_net|int }}</span>
+          <span>${{ "%.2f"|format(row.estimated_revenue) }}</span>
+          <span>${{ "%.2f"|format(row.rpm) }}</span>
+        </div>
+      {% else %}
+        <div class="empty">No synced analytics rows for this range.</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div>
+    <div class="section-head">
+      <h2>Revenue Pace</h2>
+      <span class="muted">Not predictive models</span>
+    </div>
+    <div class="stack forecast-stack">
+      <div><strong>MTD run rate</strong><span>${{ "%.2f"|format(forecasts.mtd_run_rate or 0) }}</span></div>
+      <div><strong>7-day pace</strong><span>${{ "%.2f"|format(forecasts.seven_day_pace or 0) }}</span></div>
+      <div><strong>28-day pace</strong><span>${{ "%.2f"|format(forecasts.twenty_eight_day_pace or 0) }}</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="runs-panel">
+  <div class="section-head">
+    <h2>Livestream Analytics</h2>
+    <span class="muted">Live and replay performance stay separate where YouTube exposes it.</span>
+  </div>
+  <div class="table analytics-table">
+    <div class="table-row analytics-live-row table-head">
+      <span>Livestream</span><span>Views</span><span>Live</span><span>Replay</span><span>Revenue</span><span>Peak CCV</span>
+    </div>
+    {% for stream in overview.livestreams %}
+      <a class="table-row analytics-live-row analytics-link-row" href="{{ url_path(request, '/analytics/livestreams/' ~ stream.video_id) }}">
+        <span class="analytics-video-cell">
+          {% if stream.thumbnail %}<img src="{{ stream.thumbnail }}" alt="" loading="lazy">{% endif %}
+          <strong>{{ stream.title }}</strong>
+        </span>
+        <span>{{ stream.total_views|int }}</span>
+        <span>{{ stream.live_views|int }}</span>
+        <span>{{ stream.replay_views|int }}</span>
+        <span>${{ "%.2f"|format(stream.estimated_revenue) }}</span>
+        <span>{{ stream.peak_concurrent_viewers|int }}</span>
+      </a>
+    {% else %}
+      <div class="empty">No livestream analytics synced for this range.</div>
+    {% endfor %}
+  </div>
+</section>
+
+<script id="analytics-chart-data" type="application/json">{{ overview.charts|tojson }}</script>
+<script>
+(() => {
+  const rows = JSON.parse(document.getElementById("analytics-chart-data").textContent || "[]");
+  const color = getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#5cc39d";
+  function draw(canvas) {
+    const metric = canvas.dataset.series;
+    const ctx = canvas.getContext("2d");
+    const width = canvas.clientWidth;
+    const height = 220;
+    canvas.width = Math.max(320, width * devicePixelRatio);
+    canvas.height = height * devicePixelRatio;
+    ctx.scale(devicePixelRatio, devicePixelRatio);
+    ctx.clearRect(0, 0, width, height);
+    const values = rows.map(row => Number(row[metric] || 0));
+    if (!values.length) {
+      ctx.fillStyle = "#9aa8a1";
+      ctx.fillText("No synced data", 16, 32);
+      return;
+    }
+    const max = Math.max(...values, 1);
+    const step = values.length > 1 ? (width - 28) / (values.length - 1) : 0;
+    ctx.strokeStyle = "#2d3733";
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 4; i++) {
+      const y = 18 + i * 48;
+      ctx.beginPath();
+      ctx.moveTo(14, y);
+      ctx.lineTo(width - 14, y);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    values.forEach((value, index) => {
+      const x = 14 + index * step;
+      const y = height - 18 - (value / max) * (height - 42);
+      if (index === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+  document.querySelectorAll(".analytics-chart").forEach(draw);
+  window.addEventListener("resize", () => document.querySelectorAll(".analytics-chart").forEach(draw));
+})();
+</script>
+{% endblock %}

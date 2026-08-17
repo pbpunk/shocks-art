@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="terminal-shell">
+  <div class="terminal-titlebar">
+    <div>
+      <span class="terminal-dot red"></span>
+      <span class="terminal-dot yellow"></span>
+      <span class="terminal-dot green"></span>
+    </div>
+    <strong>gemini-audit-console</strong>
+    <span>{{ settings.gemini_model }}</span>
+  </div>
+
+  <div class="terminal-grid">
+    <aside class="terminal-sidebar">
+      <div class="terminal-prompt">$ runs --latest 30</div>
+      {% for run in runs %}
+        <a class="terminal-run {% if selected_run and selected_run.analysis_run_id == run.analysis_run_id %}active{% endif %}" href="{{ url_path(request, '/debug?run_id=' ~ run.analysis_run_id) }}">
+          <span>{{ run.status|upper }}</span>
+          <strong>{{ run.stream.title }}</strong>
+          <small>{{ run.model }}</small>
+        </a>
+      {% else %}
+        <div class="terminal-empty">No extraction runs yet.</div>
+      {% endfor %}
+    </aside>
+
+    <div class="terminal-main">
+      {% if selected_run %}
+        <div class="terminal-command">
+          <span>$ inspect-run {{ selected_run.analysis_run_id }}</span>
+          <div class="actions">
+            <a class="button secondary" href="{{ selected_run.stream.url }}">Open YouTube</a>
+            <a class="button secondary" href="{{ selected_run.stream.url }}&t=0s">Native Gemini</a>
+            <form method="post" action="{{ url_path(request, '/actions/debug/probe') }}">
+              <input type="hidden" name="run_id" value="{{ selected_run.analysis_run_id }}">
+              <button type="submit">Run Video Probe</button>
+            </form>
+          </div>
+        </div>
+
+        <pre class="terminal-output">status={{ selected_run.status }}
+model={{ selected_run.model }}
+stream={{ selected_run.stream.title }}
+url={{ selected_run.stream.url }}
+started={{ selected_run.request_started_at }}
+completed={{ selected_run.request_completed_at or "running" }}
+retries={{ selected_run.retry_count }}
+{% if selected_run.exception_message %}
+message={{ selected_run.exception_message }}
+{% endif %}</pre>
+
+        <section class="terminal-block">
+          <h2>$ cat video_access_probe.log</h2>
+          <pre>{% if probe_log %}{{ probe_log }}{% else %}[not run] Press "Run Video Probe" to ask Gemini whether it can directly inspect the selected stream at 00:36:20.{% endif %}</pre>
+        </section>
+
+        <section class="terminal-block">
+          <h2>$ cat full_exchange.log</h2>
+          <pre>{% if debug_log %}{{ debug_log }}{% else %}[legacy run] No full exchange log was saved for this run. Future runs log prompts, Gemini responses, repair prompts, validation failures, and save events here.{% endif %}</pre>
+        </section>
+
+        <section class="terminal-block">
+          <h2>$ cat prompt_to_gemini.txt</h2>
+          <pre>{{ prompt_text }}</pre>
+        </section>
+
+        <section class="terminal-block">
+          <h2>$ cat latest_raw_response.json</h2>
+          <pre>{% if raw_response %}{{ raw_response }}{% else %}[empty] No raw response file was saved.{% endif %}</pre>
+        </section>
+
+        {% if selected_run.validation_errors %}
+          <section class="terminal-block">
+            <h2>$ cat validation_errors.txt</h2>
+            <pre>{% for error in selected_run.validation_errors %}{{ error }}
+{% endfor %}</pre>
+          </section>
+        {% endif %}
+      {% else %}
+        <pre class="terminal-output">$ inspect-run
+[idle] No runs yet. Extract a stream first.</pre>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="workspace-head">
+  <div>
+    <p class="eyebrow">Human checkpoint</p>
+    <h1>Candidate Review</h1>
+    <p class="muted">Review ranked Gemini-selected source windows, tune metadata, then approve or export for editing.</p>
+  </div>
+  <div class="actions">
+    <a class="button secondary" href="{{ url_path(request, '/api/exports/candidates.csv') }}">Export CSV</a>
+    <a class="button secondary" href="{{ url_path(request, '/api/exports/candidates.json') }}">Export JSON</a>
+  </div>
+</section>
+
+<section class="toolbar">
+  <form class="filters" method="get" action="{{ url_path(request, '/candidates') }}">
+    <select name="pillar">
+      <option value="">All pillars</option>
+      {% for option in ["motivational_inspirational","personal_journey_recovery","artistic_process","explanation_education","humor_personality","mistakes_problem_solving","emergent_miscellaneous"] %}
+        <option value="{{ option }}" {% if pillar == option %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+    <select name="tag">
+      <option value="">All tags</option>
+      {% for option in tags %}
+        <option value="{{ option }}" {% if tag == option %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+    <select name="method">
+      <option value="">All methods</option>
+      {% for option in methods %}
+        <option value="{{ option }}" {% if method == option %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+    <select name="review_status">
+      <option value="">Active statuses</option>
+      {% for option in ["pending_review","needs_verification","manually_verified_reference","approved","rejected","later","exported_to_vizard","archived"] %}
+        <option value="{{ option }}" {% if review_status == option %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+    <select name="sort">
+      {% for option in ["weighted_score","confidence","hook_strength","visual_quality","editing_potential","published_at"] %}
+        <option value="{{ option }}" {% if sort == option %}selected{% endif %}>{{ option }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Apply</button>
+  </form>
+</section>
+
+<section class="review-list">
+  {% for candidate in candidates %}
+    <article class="review-item">
+      <div class="media video-shell" data-video-id="{{ candidate.stream.source_video_id }}" data-start="{{ candidate.start_seconds }}" data-title="{{ candidate.stream.title }}">
+        <div class="video-placeholder">
+          <strong>{{ candidate.start_timestamp }}-{{ candidate.end_timestamp }}</strong>
+          <span>{{ candidate.stream.title }}</span>
+          <button type="button" class="load-video">Load Video</button>
+          <a href="{{ candidate.stream.url }}&t={{ candidate.start_seconds }}s" target="_blank" rel="noreferrer">Open in YouTube</a>
+        </div>
+      </div>
+      <div class="review-body">
+        <div class="row">
+          <div>
+            <h2>#{{ candidate.candidate_rank }} {{ candidate.title }}</h2>
+            <a href="{{ candidate.stream.url }}&t={{ candidate.start_seconds }}s">{{ candidate.stream.title }}</a>
+          </div>
+          <div class="score-badge">
+            <strong>{{ "%.1f"|format(candidate.weighted_score) }}</strong>
+            <span>weighted</span>
+          </div>
+        </div>
+
+        <div class="metadata-line">
+          <mark class="status {{ candidate.review_status }}">{{ candidate.review_status }}</mark>
+          <span>{{ candidate.start_timestamp }}-{{ candidate.end_timestamp }}</span>
+          <span>{{ candidate.duration_seconds }}s</span>
+          <span>{{ candidate.primary_pillar }}</span>
+          <span>{{ candidate.analysis_run.model }}</span>
+        </div>
+
+        <div class="evidence-grid">
+          <section>
+            <h3>Why This Window</h3>
+            <p>{{ candidate.selection_reason }}</p>
+          </section>
+          <section>
+            <h3>Summary</h3>
+            <p>{{ candidate.concise_summary }}</p>
+          </section>
+          <section>
+            <h3>Visual Evidence</h3>
+            {% if candidate.visual_evidence %}
+              <ul class="evidence-list">
+                {% for evidence in candidate.visual_evidence %}
+                  <li><a href="{{ candidate.stream.url }}&t={{ evidence.seconds }}s">{{ evidence.timestamp }}</a> {{ evidence.text }}</li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p>{{ candidate.visual_description }}</p>
+            {% endif %}
+          </section>
+          <section>
+            <h3>Transcript Evidence</h3>
+            {% if candidate.transcript_evidence %}
+              <ul class="evidence-list">
+                {% for evidence in candidate.transcript_evidence %}
+                  <li><a href="{{ candidate.stream.url }}&t={{ evidence.seconds }}s">{{ evidence.timestamp }}</a> {{ evidence.text }}</li>
+                {% endfor %}
+              </ul>
+            {% else %}
+              <p><span class="unverified">Unverified legacy text:</span> {{ candidate.transcript_excerpt }}</p>
+            {% endif %}
+          </section>
+        </div>
+
+        <div class="tags">{% for tag in candidate.tags %}<span>{{ tag }}</span>{% endfor %}</div>
+        {% if candidate.risks %}
+          <div class="risk-tags">{% for risk in candidate.risks %}<span>{{ risk }}</span>{% endfor %}</div>
+        {% endif %}
+
+        <details>
+          <summary>Component scores</summary>
+          <div class="scores">
+            {% for key, value in candidate.scores.items() %}
+              <label>{{ key }}<meter min="0" max="100" value="{{ value }}"></meter><span>{{ value }}</span></label>
+            {% endfor %}
+          </div>
+        </details>
+
+        <form class="review" method="post" action="{{ url_path(request, '/api/candidates/' ~ candidate.candidate_window_id ~ '/review') }}">
+          <select name="review_status">
+            {% for option in ["manually_verified_reference","needs_verification","approved","rejected","later","pending_review","exported_to_vizard","archived"] %}
+              <option value="{{ option }}" {% if candidate.review_status == option %}selected{% endif %}>{{ option }}</option>
+            {% endfor %}
+          </select>
+          <input name="start_seconds" type="number" min="0" value="{{ candidate.start_seconds }}" aria-label="start seconds">
+          <input name="end_seconds" type="number" min="1" value="{{ candidate.end_seconds }}" aria-label="end seconds">
+          <input name="primary_pillar" value="{{ candidate.primary_pillar }}" aria-label="primary pillar">
+          <input name="tags" value="{{ candidate.tags|join(', ') }}" aria-label="tags">
+          <input name="reviewer_notes" placeholder="notes" value="{{ candidate.reviewer_notes }}" aria-label="reviewer notes">
+          <button type="submit">Save Review</button>
+        </form>
+      </div>
+    </article>
+  {% else %}
+    <div class="empty-state">
+      <h2>No candidate windows yet</h2>
+      <p>Return to the pipeline and extract the next queued stream. Once Gemini saves a validated window, it will appear here for review.</p>
+      <a class="button" href="{{ url_path(request, '/pipeline') }}">Go to Pipeline</a>
+    </div>
+  {% endfor %}
+</section>
+<script>
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest(".load-video");
+    if (!button) return;
+    const shell = button.closest(".video-shell");
+    if (!shell || shell.querySelector("iframe")) return;
+    const iframe = document.createElement("iframe");
+    iframe.src = `https://www.youtube.com/embed/${shell.dataset.videoId}?start=${shell.dataset.start}`;
+    iframe.title = shell.dataset.title || "YouTube video";
+    iframe.allowFullscreen = true;
+    iframe.loading = "lazy";
+    shell.replaceChildren(iframe);
+  });
+</script>
+{% endblock %}

@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "candidate_window.schema.v1.json",
+  "title": "Shocks Art Candidate Window Response",
+  "type": "object",
+  "required": ["schema_version", "stream_id", "source_video_id"],
+  "anyOf": [
+    { "required": ["candidates"] },
+    { "required": ["candidate"] }
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": "1.0" },
+    "stream_id": { "type": "string", "minLength": 1 },
+    "source_video_id": { "type": "string", "minLength": 1 },
+    "candidate": { "$ref": "#/$defs/candidate" },
+    "candidates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5,
+      "items": { "$ref": "#/$defs/candidate" }
+    }
+  },
+  "$defs": {
+    "candidate": {
+      "type": "object",
+      "required": [
+        "title",
+        "start_seconds",
+        "end_seconds",
+        "start_timestamp",
+        "end_timestamp",
+        "duration_seconds",
+        "concise_summary",
+        "selection_reason",
+        "primary_pillar",
+        "secondary_pillars",
+        "tags",
+        "transcript_excerpt",
+        "visual_description",
+        "contextual_notes",
+        "estimated_short_count",
+        "possible_hooks",
+        "editing_notes",
+        "risks",
+        "scores",
+        "emergent_observations"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "start_seconds": { "type": "integer", "minimum": 0 },
+        "end_seconds": { "type": "integer", "minimum": 1 },
+        "start_timestamp": { "type": "string", "pattern": "^[0-9]{2}:[0-9]{2}:[0-9]{2}$" },
+        "end_timestamp": { "type": "string", "pattern": "^[0-9]{2}:[0-9]{2}:[0-9]{2}$" },
+        "duration_seconds": { "type": "integer", "minimum": 1 },
+        "concise_summary": { "type": "string" },
+        "selection_reason": { "type": "string" },
+        "primary_pillar": { "$ref": "#/$defs/pillar" },
+        "secondary_pillars": { "type": "array", "items": { "$ref": "#/$defs/pillar" }, "uniqueItems": true },
+        "tags": { "type": "array", "items": { "type": "string" } },
+        "transcript_excerpt": { "type": "string" },
+        "visual_description": { "type": "string" },
+        "transcript_evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/timedEvidence" }
+        },
+        "visual_evidence": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/timedEvidence" }
+        },
+        "contextual_notes": { "type": "string" },
+        "estimated_short_count": { "type": "integer", "minimum": 1 },
+        "possible_hooks": { "type": "array", "items": { "type": "string" } },
+        "editing_notes": { "type": "array", "items": { "type": "string" } },
+        "risks": { "type": "array", "items": { "type": "string" } },
+        "scores": {
+          "type": "object",
+          "required": [
+            "pillar_relevance",
+            "hook_strength",
+            "standalone_clarity",
+            "visual_quality",
+            "audio_clarity",
+            "emotional_impact",
+            "educational_value",
+            "entertainment_value",
+            "editing_potential",
+            "brand_fit",
+            "confidence"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "pillar_relevance": { "$ref": "#/$defs/score" },
+            "hook_strength": { "$ref": "#/$defs/score" },
+            "standalone_clarity": { "$ref": "#/$defs/score" },
+            "visual_quality": { "$ref": "#/$defs/score" },
+            "audio_clarity": { "$ref": "#/$defs/score" },
+            "emotional_impact": { "$ref": "#/$defs/score" },
+            "educational_value": { "$ref": "#/$defs/score" },
+            "entertainment_value": { "$ref": "#/$defs/score" },
+            "editing_potential": { "$ref": "#/$defs/score" },
+            "brand_fit": { "$ref": "#/$defs/score" },
+            "confidence": { "$ref": "#/$defs/score" }
+          }
+        },
+        "emergent_observations": { "type": "object" }
+      }
+    },
+    "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "timedEvidence": {
+      "type": "object",
+      "required": ["timestamp", "seconds", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "timestamp": { "type": "string", "pattern": "^[0-9]{2}:[0-9]{2}:[0-9]{2}$" },
+        "seconds": { "type": "integer", "minimum": 0 },
+        "text": { "type": "string" }
+      }
+    },
+    "pillar": {
+      "type": "string",
+      "enum": [
+        "motivational_inspirational",
+        "personal_journey_recovery",
+        "artistic_process",
+        "explanation_education",
+        "humor_personality",
+        "mistakes_problem_solving",
+        "emergent_miscellaneous"
+      ]
+    }
+  }
+}

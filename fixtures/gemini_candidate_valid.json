@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "stream_id": "stream_fixture",
+  "source_video_id": "fixture_stream_001",
+  "candidate": {
+    "title": "Turning a mistake into a clean recovery",
+    "start_seconds": 600,
+    "end_seconds": 1020,
+    "start_timestamp": "00:10:00",
+    "end_timestamp": "00:17:00",
+    "duration_seconds": 420,
+    "concise_summary": "Nate notices a small process issue while working, explains what happened, and keeps the piece moving with a calm adjustment.",
+    "selection_reason": "The segment combines visible art-making, a clear problem, practical explanation, and an authentic recovery arc that can support multiple shorts.",
+    "primary_pillar": "mistakes_problem_solving",
+    "secondary_pillars": ["artistic_process", "explanation_education"],
+    "tags": ["Mistake Recovery", "wood burning", "process footage", "tool adjustment"],
+    "transcript_excerpt": "Nate explains the issue and talks through the fix while continuing to work on the piece.",
+    "visual_description": "Hands and tools are visible early, with sustained close-up work on the art piece.",
+    "contextual_notes": "Preserve the setup so the problem and recovery are represented honestly.",
+    "estimated_short_count": 2,
+    "possible_hooks": ["I almost ruined this part", "Here is how I fix a process mistake"],
+    "editing_notes": ["Open on the visible issue", "Use explanation as voiceover over the repair"],
+    "risks": ["Do not overstate the severity of the mistake"],
+    "scores": {
+      "pillar_relevance": 92,
+      "hook_strength": 78,
+      "standalone_clarity": 86,
+      "visual_quality": 84,
+      "audio_clarity": 82,
+      "emotional_impact": 74,
+      "educational_value": 88,
+      "entertainment_value": 72,
+      "editing_potential": 90,
+      "brand_fit": 91,
+      "confidence": 87
+    },
+    "emergent_observations": {
+      "materials": ["wood"],
+      "tone": "calm and practical"
+    }
+  }
+}
+

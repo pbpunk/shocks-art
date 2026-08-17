@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    {% if (active_runs is defined and active_runs) or (native_active is defined and native_active) %}
+      <meta http-equiv="refresh" content="8">
+    {% endif %}
+    <title>Shocks Art Content System</title>
+    <link rel="stylesheet" href="{{ url_path(request, '/static/styles.css?v=analytics-mobile-1') }}">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="{{ url_path(request, '/') }}">Shocks Art Content System</a>
+      <nav>
+        <a href="{{ url_path(request, '/') }}">Clips</a>
+        <a href="{{ url_path(request, '/pipeline') }}">Pipeline</a>
+        <a href="{{ url_path(request, '/candidates') }}">Review</a>
+        <a href="{{ url_path(request, '/analytics') }}">Analytics</a>
+        <a href="{{ url_path(request, '/debug') }}">Debug</a>
+      </nav>
+    </header>
+    <main>
+      {% block content %}{% endblock %}
+    </main>
+  </body>
+</html>
