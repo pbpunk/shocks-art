@@ -9,20 +9,43 @@
     <title>Shocks Art Content System</title>
     <link rel="stylesheet" href="{{ url_path(request, '/static/styles.css?v=analytics-mobile-1') }}">
     {% block head_extra %}{% endblock %}
-    <link rel="stylesheet" href="{{ url_path(request, '/static/app_shell.css?v=dvr-shell-1') }}">
+    <link rel="stylesheet" href="{{ url_path(request, '/static/app_shell.css?v=jarvis-shell-2') }}">
   </head>
   <body>
-    <header class="topbar">
-      <a class="brand" href="{{ url_path(request, '/') }}">Shocks Art Content System</a>
-      <nav>
-        <a data-app-tab="clips" href="{{ url_path(request, '/') }}">Clips</a>
-        <a data-app-tab="library" href="{{ url_path(request, '/library') }}">Library</a>
-        <a data-app-tab="debug" href="{{ url_path(request, '/debug') }}">Debug</a>
+    <div class="app-shell">
+      <nav class="side-rail" aria-label="Primary navigation">
+        <a class="rail-logo" href="{{ url_path(request, '/') }}">Shock's Art</a>
+        <div class="rail-nav">
+          <a class="rail-item" data-app-tab="clips" href="{{ url_path(request, '/') }}">Clips</a>
+          <a class="rail-item" data-app-tab="library" href="{{ url_path(request, '/library') }}">Library</a>
+          <a class="rail-item" data-app-tab="debug" href="{{ url_path(request, '/debug') }}">Debug</a>
+        </div>
       </nav>
-    </header>
-    <main>
-      {% block content %}{% endblock %}
-    </main>
-    <script src="{{ url_path(request, '/static/tab_swipe.js?v=2') }}" defer></script>
+
+      <div class="app-main" id="app-main">
+        {% block secondary_nav %}{% endblock %}
+        <main>
+          {% block content %}{% endblock %}
+        </main>
+      </div>
+
+      <nav class="bottom-nav" aria-label="Primary navigation">
+        <div class="bottom-nav-inner">
+          <a class="bottom-nav-item" data-app-tab="clips" href="{{ url_path(request, '/') }}">
+            <span class="bottom-nav-icon" aria-hidden="true">▤</span>
+            <span>Clips</span>
+          </a>
+          <a class="bottom-nav-item" data-app-tab="library" href="{{ url_path(request, '/library') }}">
+            <span class="bottom-nav-icon" aria-hidden="true">▦</span>
+            <span>Library</span>
+          </a>
+          <a class="bottom-nav-item" data-app-tab="debug" href="{{ url_path(request, '/debug') }}">
+            <span class="bottom-nav-icon" aria-hidden="true">›_</span>
+            <span>Debug</span>
+          </a>
+        </div>
+      </nav>
+    </div>
+    <script src="{{ url_path(request, '/static/tab_swipe.js?v=jarvis-shell-2') }}" defer></script>
   </body>
 </html>
