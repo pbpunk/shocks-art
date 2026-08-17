@@ -6,12 +6,17 @@
       {{ refresh_message }}
     </span>
   {% endif %}
-  <form method="post" action="{{ url_path(request, '/actions/clips/refresh-streams') }}">
-    <button type="submit" class="clips-update-button" aria-label="Update clips from new streams">
-      <svg aria-hidden="true" viewBox="0 0 24 24" focusable="false">
+  <form method="post" action="{{ url_path(request, '/actions/clips/refresh-streams') }}" class="clips-update-form">
+    <button
+      type="submit"
+      class="clips-update-button"
+      aria-label="Update clips from new streams"
+      data-update-status-url="{{ url_path(request, '/api/clips/update-state') }}"
+    >
+      <svg class="clips-update-icon" aria-hidden="true" viewBox="0 0 24 24" focusable="false">
         <path d="M20 11a8.1 8.1 0 0 0-14.9-4.3L3 9m0 0V4m0 5h5M4 13a8.1 8.1 0 0 0 14.9 4.3L21 15m0 0v5m0-5h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>
-      <span>Update</span>
+      <span class="clips-update-label">Update</span>
     </button>
   </form>
 </div>
