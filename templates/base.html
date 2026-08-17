@@ -8,6 +8,7 @@
     {% endif %}
     <title>Shocks Art Content System</title>
     <link rel="stylesheet" href="{{ url_path(request, '/static/styles.css?v=analytics-mobile-1') }}">
+    {% block head_extra %}{% endblock %}
   </head>
   <body>
     <header class="topbar">
