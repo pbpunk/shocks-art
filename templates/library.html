@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
+<link rel="stylesheet" href="{{ url_path(request, '/static/library.css?v=library-catalog-1') }}">
 <section class="panel">
   <div class="section-heading">
     <div>
@@ -14,7 +15,7 @@
   </div>
 
   {% if ingest_message %}
-    <div class="notice {{ 'error' if ingest_status == 'error' else 'success' }}">
+    <div class="notice {{ ingest_status }}">
       {{ ingest_message }}
     </div>
   {% endif %}
@@ -89,9 +90,9 @@
                   —
                 {% endif %}
               </td>
-              <td>{{ media.width }}×{{ media.height if media.width and media.height else '—' }}</td>
+              <td>{% if media.width and media.height %}{{ media.width }}×{{ media.height }}{% else %}—{% endif %}</td>
               <td>{{ "%.1f"|format(media.size_bytes / 1048576) }} MB</td>
-              <td>{{ media.processing_status }}</td>
+              <td><span class="status {{ media.processing_status }}">{{ media.processing_status }}</span></td>
             </tr>
           {% endfor %}
         </tbody>
