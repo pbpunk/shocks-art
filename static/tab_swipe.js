@@ -1,6 +1,19 @@
 (() => {
-  const tabLinks = [...document.querySelectorAll('nav a[data-app-tab]')];
-  if (tabLinks.length < 2) return;
+  const allTabLinks = [...document.querySelectorAll('a[data-app-tab]')];
+  if (allTabLinks.length < 2) return;
+
+  const linksByDest = new Map();
+  const primaryOrder = [];
+  allTabLinks.forEach((link) => {
+    const dest = link.dataset.appTab;
+    if (!dest) return;
+    if (!linksByDest.has(dest)) {
+      linksByDest.set(dest, []);
+      primaryOrder.push(dest);
+    }
+    linksByDest.get(dest).push(link);
+  });
+  if (primaryOrder.length < 2) return;
 
   const normalizePath = (value) => {
     try {
@@ -12,17 +25,17 @@
   };
 
   const currentPath = normalizePath(window.location.pathname);
-  const tabPaths = tabLinks.map((link) => normalizePath(link.href));
+  const tabPaths = primaryOrder.map((dest) => normalizePath(linksByDest.get(dest)[0].href));
   let currentIndex = tabPaths.indexOf(currentPath);
 
-  // Clips can be reached through either the prefixed root or a trailing slash.
   if (currentIndex < 0) {
     currentIndex = tabPaths.findIndex((path) => currentPath === `${path}/` || `${currentPath}/` === path);
   }
   if (currentIndex < 0) return;
 
-  tabLinks.forEach((link, index) => {
-    const isActive = index === currentIndex;
+  const activeDest = primaryOrder[currentIndex];
+  allTabLinks.forEach((link) => {
+    const isActive = link.dataset.appTab === activeDest;
     link.classList.toggle('active', isActive);
     if (isActive) {
       link.setAttribute('aria-current', 'page');
@@ -33,7 +46,27 @@
 
   if (!('ontouchstart' in window)) return;
 
-  const interactiveSelector = 'a, button, input, select, textarea, video, iframe, [contenteditable="true"], [role="button"]';
+  const swipeSurface = document.querySelector('#app-main');
+  if (!swipeSurface) return;
+
+  const interactiveSelector = [
+    'a',
+    'button',
+    'input',
+    'select',
+    'textarea',
+    'video',
+    'audio',
+    'iframe',
+    'summary',
+    '[contenteditable="true"]',
+    '[role="button"]',
+    '[role="tab"]',
+    '[draggable="true"]',
+    '[data-no-swipe]',
+    '.secondary-nav',
+    '.sub-nav'
+  ].join(', ');
   const minDistance = 70;
   const maxDuration = 800;
   const directionBias = 1.35;
@@ -44,7 +77,7 @@
   let startTime = 0;
   let tracking = false;
 
-  document.addEventListener('touchstart', (event) => {
+  swipeSurface.addEventListener('touchstart', (event) => {
     if (event.touches.length !== 1) {
       tracking = false;
       return;
@@ -64,7 +97,7 @@
     tracking = true;
   }, { passive: true });
 
-  document.addEventListener('touchend', (event) => {
+  swipeSurface.addEventListener('touchend', (event) => {
     if (!tracking || event.changedTouches.length !== 1) {
       tracking = false;
       return;
@@ -80,12 +113,14 @@
     if (!horizontalEnough || elapsed > maxDuration) return;
 
     const nextIndex = deltaX < 0 ? currentIndex + 1 : currentIndex - 1;
-    if (nextIndex < 0 || nextIndex >= tabLinks.length) return;
+    if (nextIndex < 0 || nextIndex >= primaryOrder.length) return;
 
-    window.location.assign(tabLinks[nextIndex].href);
+    const nextDest = primaryOrder[nextIndex];
+    const nextLink = linksByDest.get(nextDest)?.[0];
+    if (nextLink) window.location.assign(nextLink.href);
   }, { passive: true });
 
-  document.addEventListener('touchcancel', () => {
+  swipeSurface.addEventListener('touchcancel', () => {
     tracking = false;
   }, { passive: true });
 })();
