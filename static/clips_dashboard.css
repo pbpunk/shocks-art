@@ -18,14 +18,16 @@
 
 .clips-dashboard .favorite-filter,
 .clips-dashboard .sort-chip {
-  min-height: 32px;
-  padding: 0 10px;
+  min-height: 36px;
+  padding: 0 11px;
   font-size: 13px;
 }
 
 .clips-dashboard .favorite-filter[data-filter="favorites"],
 .clips-dashboard .favorite-filter[data-filter="not-favorites"] {
   width: 36px;
+  height: 36px;
+  min-height: 36px;
   padding: 0;
   font-size: 18px;
   line-height: 1;
@@ -37,7 +39,7 @@
   justify-content: flex-end;
   gap: 8px;
   min-width: 0;
-  min-height: 32px;
+  min-height: 36px;
   margin-left: auto;
 }
 
@@ -46,15 +48,15 @@
 }
 
 .clips-update-button {
-  min-height: 32px;
+  min-height: 36px;
   gap: 6px;
-  padding: 0 10px;
+  padding: 0 11px;
   font-size: 13px;
 }
 
 .clips-update-button svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
   flex: 0 0 auto;
 }
 
@@ -108,35 +110,38 @@
 
   .clips-dashboard .favorite-filter,
   .clips-dashboard .sort-chip {
-    min-height: 30px;
-    padding: 0 7px;
-    font-size: 12px;
+    min-height: 36px;
+    padding: 0 8px;
+    font-size: 13px;
   }
 
   .clips-dashboard .favorite-filter[data-filter="favorites"],
   .clips-dashboard .favorite-filter[data-filter="not-favorites"] {
-    width: 32px;
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
     padding: 0;
-    font-size: 17px;
+    font-size: 18px;
   }
 
   .clips-refresh-bar {
     flex: 0 0 auto;
     width: auto;
+    min-height: 36px;
     margin-left: auto;
     gap: 5px;
   }
 
   .clips-update-button {
-    min-height: 30px;
-    gap: 4px;
-    padding: 0 7px;
-    font-size: 12px;
+    min-height: 36px;
+    gap: 5px;
+    padding: 0 9px;
+    font-size: 13px;
   }
 
   .clips-update-button svg {
-    width: 14px;
-    height: 14px;
+    width: 15px;
+    height: 15px;
   }
 
   .clips-refresh-message {
