@@ -1,7 +1,9 @@
+{% if not compact_dashboard %}
 <section class="public-head">
   <h1>Shocks Art Clips</h1>
   <p>{{ candidates|length }} livestream clips</p>
 </section>
+{% endif %}
 
 <section class="public-controls" aria-label="Clip controls">
   <div class="public-filters" aria-label="Clip filters">
@@ -17,6 +19,9 @@
       Date <span aria-hidden="true">↓</span>
     </button>
   </div>
+  {% if compact_dashboard %}
+    {% include "clip_stream_refresh.html" %}
+  {% endif %}
 </section>
 
 <p class="public-filter-empty" hidden>No clips match this filter.</p>
