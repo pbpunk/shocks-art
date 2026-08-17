@@ -46,17 +46,21 @@
       if (!newIds.size) return;
 
       document.querySelectorAll(".public-clip[data-candidate-id]").forEach((card) => {
-        if (!newIds.has(card.dataset.candidateId)) return;
-        const heading = card.querySelector(".public-title-row h2");
-        if (!heading || heading.querySelector(".new-chip")) return;
-        const chip = document.createElement("span");
-        chip.className = "new-chip";
-        chip.textContent = "NEW";
-        chip.setAttribute("aria-label", "New clip from latest productive stream refresh");
-        heading.appendChild(chip);
+        if (!newIds.has(card.dataset.candidateId) || card.querySelector(".new-banner")) return;
+        const thumbnail = card.querySelector(".public-video");
+        if (!thumbnail) return;
+
+        const banner = document.createElement("div");
+        banner.className = "new-banner";
+        banner.textContent = "NEW";
+        banner.setAttribute("role", "status");
+        banner.setAttribute("aria-label", "New clip from latest productive stream refresh");
+
+        card.classList.add("has-new-banner");
+        card.insertBefore(banner, thumbnail);
       });
     })
     .catch(() => {
-      // NEW chips are supplemental UI; a state read failure should not affect Clips.
+      // NEW banners are supplemental UI; a state read failure should not affect Clips.
     });
 })();
