@@ -66,6 +66,9 @@
 }
 
 .clips-update-button {
+  --update-progress: 0%;
+  position: relative;
+  overflow: hidden;
   min-height: 36px;
   gap: 6px;
   padding: 0 11px;
@@ -73,10 +76,27 @@
   transition: border-color .15s ease, background-color .15s ease, color .15s ease, opacity .15s ease;
 }
 
+.clips-update-button > :not(.clips-update-progress) {
+  position: relative;
+  z-index: 1;
+}
+
 .clips-update-button svg {
   width: 16px;
   height: 16px;
   flex: 0 0 auto;
+}
+
+.clips-update-progress {
+  position: absolute;
+  z-index: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--update-progress);
+  height: 3px;
+  background: rgb(5 35 27 / 72%);
+  transition: width .25s ease;
+  pointer-events: none;
 }
 
 .clips-update-button.is-updating {
@@ -98,23 +118,12 @@
   background: transparent;
 }
 
+.clips-update-button.is-failed .clips-update-progress {
+  background: var(--danger);
+}
+
 @keyframes clips-update-spin {
   to { transform: rotate(360deg); }
-}
-
-.clips-refresh-message {
-  max-width: min(42vw, 520px);
-  min-width: 0;
-  overflow: hidden;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.clips-refresh-message.is-error {
-  color: var(--danger);
 }
 
 .new-chip {
@@ -189,9 +198,5 @@
   .clips-update-button svg {
     width: 15px;
     height: 15px;
-  }
-
-  .clips-refresh-message {
-    display: none;
   }
 }
