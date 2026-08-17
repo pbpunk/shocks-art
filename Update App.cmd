@@ -1,3 +1,3 @@
 @echo off
 cd /d "%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\refresh_server.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\update_app.ps1"

@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "id": "shocks-art",
+  "name": "Shocks Art",
+  "route": "/shocks_art",
+  "ports": [8000],
+  "primaryPort": 8000,
+  "local": {
+    "protocol": "http",
+    "baseUrl": "http://127.0.0.1:8000/shocks_art"
+  },
+  "health": {
+    "path": "/shocks_art/health",
+    "url": "http://127.0.0.1:8000/shocks_art/health",
+    "startupTimeoutSeconds": 45
+  },
+  "lifecycle": {
+    "start": "Start App.cmd",
+    "stop": "Stop App.cmd",
+    "restart": "Restart App.cmd",
+    "update": "Update App.cmd"
+  },
+  "runtime": {
+    "file": "data/runtime.json",
+    "logsDir": "data/logs"
+  },
+  "network": {
+    "public": {
+      "httpsPort": 443,
+      "path": "/shocks_art"
+    },
+    "private": {
+      "httpsPort": 8443,
+      "path": "/shocks_art"
+    },
+    "upstream": "http://127.0.0.1:8000/shocks_art"
+  }
+}

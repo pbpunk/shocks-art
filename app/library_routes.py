@@ -1,3 +1,5 @@
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -16,6 +18,10 @@ from app.services.library import ingest_local_media, scan_media_files
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
+APP_ID = "shocks-art"
+APP_NAME = "Shocks Art"
+APP_ROUTE = os.getenv("APP_ROUTE", "/shocks_art")
+APP_STARTED_AT = datetime.now(timezone.utc).isoformat()
 
 
 def url_path(request: Request, path: str) -> str:
@@ -31,10 +37,30 @@ def local_redirect(request: Request, path: str, status_code: int = 303) -> Redir
 templates.env.globals["url_path"] = url_path
 
 
+def app_version() -> str:
+    return os.getenv("JARVIS_COMMIT_SHA", "unknown")
+
+
 @router.get("/health")
 def app_health():
-    """Cheap readiness endpoint used by the JARVIS app contract."""
-    return {"status": "ok", "app": "shocks-art"}
+    """Canonical JARVIS readiness and identity endpoint."""
+    return {
+        "status": "ok",
+        "ok": True,
+        "app": APP_ID,
+        "name": APP_NAME,
+        "route": APP_ROUTE,
+        "version": app_version(),
+        "startedAt": APP_STARTED_AT,
+        "mode": os.getenv("JARVIS_MODE", "production"),
+        "checkedAt": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@router.get("/api/ping")
+def app_ping():
+    """Cheap API-route verification endpoint for JARVIS startup checks."""
+    return {"ok": True, "app": APP_ID, "route": APP_ROUTE, "version": app_version()}
 
 
 @router.get("/library", response_class=HTMLResponse)

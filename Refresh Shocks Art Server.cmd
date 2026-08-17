@@ -1,4 +1,4 @@
 @echo off
 cd /d "%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0tools\refresh_server.ps1"
+call "%~dp0Update App.cmd"
 pause
