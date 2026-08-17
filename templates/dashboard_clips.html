@@ -1,12 +1,12 @@
 {% extends "base.html" %}
 {% block head_extra %}
-  <link rel="stylesheet" href="{{ url_path(request, '/static/clips_dashboard.css?v=compact-new-7') }}">
+  <link rel="stylesheet" href="{{ url_path(request, '/static/clips_dashboard.css?v=compact-new-8') }}">
 {% endblock %}
 {% block content %}
   <div class="clips-dashboard">
     {% set compact_dashboard = true %}
     {% include "public_clips_content.html" %}
   </div>
-  <script src="{{ url_path(request, '/static/clips_new.js?v=3') }}" data-new-state-url="{{ url_path(request, '/api/clips/new-state') }}"></script>
+  <script src="{{ url_path(request, '/static/clips_new.js?v=4') }}" data-new-state-url="{{ url_path(request, '/api/clips/new-state') }}"></script>
   <script src="{{ url_path(request, '/static/clips_update.js?v=2') }}"></script>
 {% endblock %}
