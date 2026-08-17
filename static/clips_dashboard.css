@@ -126,20 +126,26 @@
   to { transform: rotate(360deg); }
 }
 
-.new-chip {
-  display: inline-flex;
+.new-banner {
+  display: flex;
   align-items: center;
-  min-height: 18px;
-  margin-left: 7px;
-  padding: 1px 6px;
-  border: 1px solid var(--accent);
-  border-radius: 999px;
-  color: var(--accent);
-  font-size: 10px;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 10px;
+  border: 1px solid #f06468;
+  border-bottom: 0;
+  border-radius: 7px 7px 0 0;
+  background: #d93f45;
+  color: #fff;
+  font-size: 11px;
   font-weight: 900;
   line-height: 1;
-  letter-spacing: .04em;
-  vertical-align: 2px;
+  letter-spacing: .12em;
+}
+
+.clips-dashboard .public-clip.has-new-banner .new-banner + .public-video {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 @media (max-width: 720px) {
@@ -198,5 +204,11 @@
   .clips-update-button svg {
     width: 15px;
     height: 15px;
+  }
+
+  .new-banner {
+    min-height: 27px;
+    padding: 0 9px;
+    font-size: 10px;
   }
 }
