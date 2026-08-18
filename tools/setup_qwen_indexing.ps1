@@ -66,8 +66,9 @@ New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 if (-not (Test-Path -LiteralPath $IndexPython)) {
     $Bootstrap = Get-BootstrapPython
     Write-Step "Creating isolated indexing virtual environment with $($Bootstrap.Label)"
+    $BootstrapFilePath = [string]$Bootstrap.FilePath
     $BootstrapArgs = @($Bootstrap.PrefixArgs)
-    & $Bootstrap.FilePath @BootstrapArgs -m venv $VenvDir
+    & $BootstrapFilePath @BootstrapArgs -m venv $VenvDir
     if ($LASTEXITCODE -ne 0) { throw "Could not create isolated indexing virtual environment with $($Bootstrap.Label)." }
 }
 
