@@ -12,6 +12,12 @@ from starlette.requests import Request
 
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.indexing.service import (
+    VisualExtractionConfig,
+    effective_sample_interval_seconds,
+    video_sample_timestamps_ms,
+    visual_sampling_plan,
+)
 from app.library_models import Media
 from app.services.library import IngestResult, ingest_local_media, scan_media_files
 
@@ -148,6 +154,58 @@ def library_media_inventory(
             "limit": limit,
         },
         "items": [media_inventory_item(media) for media in items],
+    }
+
+
+@router.get("/api/library/indexing/sampling-plan")
+def library_indexing_sampling_plan(db: Session = Depends(get_db)):
+    """Preview adaptive visual sampling without creating Traces or artifacts."""
+    config = VisualExtractionConfig()
+    media_items = list(
+        db.scalars(
+            select(Media)
+            .where(Media.media_kind.in_(["image", "video"]))
+            .order_by(Media.media_kind.asc(), Media.duration_seconds.asc(), Media.filename.asc())
+        ).all()
+    )
+    plans = [visual_sampling_plan(media, config) for media in media_items]
+
+    reference_durations = [
+        ("30 seconds", 30.0),
+        ("60 seconds", 60.0),
+        ("10 minutes", 600.0),
+        ("1 hour", 3600.0),
+        ("3 hours", 10800.0),
+        ("8 hours", 28800.0),
+    ]
+    references = [
+        {
+            "label": label,
+            "durationSeconds": duration,
+            "intervalSeconds": effective_sample_interval_seconds(duration, config),
+            "sampleCount": len(video_sample_timestamps_ms(duration, config)),
+        }
+        for label, duration in reference_durations
+    ]
+
+    return {
+        "schemaVersion": 1,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "mutatesState": False,
+        "configuration": {
+            "samplingPolicy": config.sampling_policy,
+            "configurationHash": config.configuration_hash,
+            **config.as_payload(),
+        },
+        "summary": {
+            "media": len(plans),
+            "video": sum(1 for plan in plans if plan["kind"] == "video"),
+            "image": sum(1 for plan in plans if plan["kind"] == "image"),
+            "expectedVisualTraces": sum(plan["sampleCount"] for plan in plans),
+            "maxVideoSamples": config.max_video_samples,
+        },
+        "items": plans,
+        "referenceDurations": references,
     }
 
 
