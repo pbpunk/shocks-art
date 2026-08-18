@@ -13,6 +13,7 @@ from typing import Protocol
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.indexing.media_retrieval import DefaultMediaRetriever, MediaRetriever
 from app.library_models import IndexRun, Media, Trace
 from app.models import now_utc
 
@@ -155,12 +156,6 @@ class VisualExtractionConfig:
 
 
 def effective_sample_interval_seconds(duration_seconds: float | None, config: VisualExtractionConfig) -> float:
-    """Return the configured interval for one video's duration.
-
-    The maximum-sample guard only widens intervals; it never makes the selected
-    duration band denser.
-    """
-
     if config.sample_interval_seconds is not None:
         return config.sample_interval_seconds
 
@@ -190,8 +185,6 @@ def video_sample_timestamps_ms(duration_seconds: float | None, config: VisualExt
 
 
 def visual_sampling_plan(media: Media, config: VisualExtractionConfig) -> dict:
-    """Return a non-mutating, machine-readable sampling plan for one Media item."""
-
     if media.media_kind == "image":
         return {
             "mediaId": media.media_id,
@@ -293,25 +286,13 @@ def index_visual_media(
     index_root: Path,
     backend: FrameExtractionBackend | None = None,
     config: VisualExtractionConfig | None = None,
+    retriever: MediaRetriever | None = None,
 ) -> VisualIndexResult:
-    """Extract restart-safe visual Traces for one Media item.
-
-    Completed Trace rows whose artifacts still exist are reused. If a previous
-    attempt stopped midway, a rerun continues only the missing timestamps. If a
-    Trace exists but its generated artifact is missing, that artifact is repaired
-    in place rather than creating a duplicate Trace.
-    """
+    """Extract restart-safe visual Traces, materializing remote bytes only for this job."""
 
     backend = backend or FfmpegFrameBackend()
     config = config or VisualExtractionConfig()
-    source_path = Path(media.source_path)
-    if media.source_type != "local":
-        raise VisualExtractionError(
-            f"visual extraction currently supports local Media only; got source_type={media.source_type!r}"
-        )
-    if not source_path.is_file():
-        raise VisualExtractionError(f"source Media is not available locally: {source_path}")
-
+    retriever = retriever or DefaultMediaRetriever()
     timestamps = visual_sample_timestamps_ms(media, config)
     run = IndexRun(
         media_id=media.media_id,
@@ -330,66 +311,69 @@ def index_visual_media(
     repaired = 0
 
     try:
-        for timestamp_ms in timestamps:
-            relative_artifact = _artifact_relative_path(media, timestamp_ms, backend, config)
-            absolute_artifact = index_root / relative_artifact
-            existing = _find_existing_trace(
-                db,
-                media=media,
-                timestamp_ms=timestamp_ms,
-                backend=backend,
-                config=config,
-            )
-
-            if existing is not None and absolute_artifact.is_file() and absolute_artifact.stat().st_size > 0:
-                reused += 1
-                continue
-
-            backend.extract_frame(
-                source_path,
-                timestamp_ms,
-                absolute_artifact,
-                still_image=media.media_kind == "image",
-            )
-
-            effective_interval = (
-                None if media.media_kind == "image" else effective_sample_interval_seconds(media.duration_seconds, config)
-            )
-            provenance = {
-                "sourceType": media.source_type,
-                "sourceSha256": media.checksum_sha256,
-                "timestampMs": timestamp_ms,
-            }
-            metadata = {
-                "artifactFormat": config.artifact_format,
-                "samplingPolicy": "still-image" if media.media_kind == "image" else config.sampling_policy,
-                "sampleIntervalSeconds": effective_interval,
-                "maxVideoSamples": config.max_video_samples,
-            }
-
-            if existing is not None:
-                existing.artifact_path = relative_artifact.as_posix()
-                existing.provenance_json = provenance
-                existing.metadata_json = metadata
-                repaired += 1
-            else:
-                db.add(
-                    Trace(
-                        media_id=media.media_id,
-                        trace_type="visual",
-                        start_ms=timestamp_ms,
-                        end_ms=timestamp_ms,
-                        artifact_path=relative_artifact.as_posix(),
-                        extractor=backend.name,
-                        extractor_version=backend.version,
-                        configuration_hash=config.configuration_hash,
-                        provenance_json=provenance,
-                        metadata_json=metadata,
-                    )
+        with retriever.materialize(media) as materialized:
+            source_path = materialized.path
+            for timestamp_ms in timestamps:
+                relative_artifact = _artifact_relative_path(media, timestamp_ms, backend, config)
+                absolute_artifact = index_root / relative_artifact
+                existing = _find_existing_trace(
+                    db,
+                    media=media,
+                    timestamp_ms=timestamp_ms,
+                    backend=backend,
+                    config=config,
                 )
-                created += 1
-            # Persist progress incrementally so a failed run can resume safely.
-            db.commit()
+
+                if existing is not None and absolute_artifact.is_file() and absolute_artifact.stat().st_size > 0:
+                    reused += 1
+                    continue
+
+                backend.extract_frame(
+                    source_path,
+                    timestamp_ms,
+                    absolute_artifact,
+                    still_image=media.media_kind == "image",
+                )
+
+                effective_interval = (
+                    None if media.media_kind == "image" else effective_sample_interval_seconds(media.duration_seconds, config)
+                )
+                provenance = {
+                    "sourceType": media.source_type,
+                    "sourceId": media.source_id,
+                    "catalogSha256": media.checksum_sha256,
+                    "timestampMs": timestamp_ms,
+                    "sourceMaterialization": "temporary" if materialized.temporary else "durable-local",
+                }
+                metadata = {
+                    "artifactFormat": config.artifact_format,
+                    "samplingPolicy": "still-image" if media.media_kind == "image" else config.sampling_policy,
+                    "sampleIntervalSeconds": effective_interval,
+                    "maxVideoSamples": config.max_video_samples,
+                }
+
+                if existing is not None:
+                    existing.artifact_path = relative_artifact.as_posix()
+                    existing.provenance_json = provenance
+                    existing.metadata_json = metadata
+                    repaired += 1
+                else:
+                    db.add(
+                        Trace(
+                            media_id=media.media_id,
+                            trace_type="visual",
+                            start_ms=timestamp_ms,
+                            end_ms=timestamp_ms,
+                            artifact_path=relative_artifact.as_posix(),
+                            extractor=backend.name,
+                            extractor_version=backend.version,
+                            configuration_hash=config.configuration_hash,
+                            provenance_json=provenance,
+                            metadata_json=metadata,
+                        )
+                    )
+                    created += 1
+                db.commit()
 
         run.status = "complete"
         run.completed_at = now_utc()
@@ -431,13 +415,25 @@ def index_all_visual_media(
     index_root: Path,
     backend: FrameExtractionBackend | None = None,
     config: VisualExtractionConfig | None = None,
+    retriever: MediaRetriever | None = None,
     limit: int | None = None,
+    include_remote: bool = False,
 ) -> list[VisualIndexResult]:
-    query = select(Media).where(Media.media_kind.in_(["image", "video"])).order_by(Media.created_at.asc())
+    query = select(Media).where(Media.media_kind.in_(["image", "video"]))
+    if not include_remote:
+        query = query.where(Media.source_type == "local")
+    query = query.order_by(Media.created_at.asc())
     if limit is not None:
         query = query.limit(limit)
     media_items = list(db.scalars(query).all())
     return [
-        index_visual_media(db, media, index_root=index_root, backend=backend, config=config)
+        index_visual_media(
+            db,
+            media,
+            index_root=index_root,
+            backend=backend,
+            config=config,
+            retriever=retriever,
+        )
         for media in media_items
     ]
