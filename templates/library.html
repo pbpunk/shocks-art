@@ -49,7 +49,10 @@
         <h2>Local ingest</h2>
         <p class="muted"><code>{{ ingest_path }}</code></p>
       </div>
-      <span class="muted">Drop media here, then Scan inbox. Re-scans are safe.</span>
+      <div>
+        <span class="muted">Drop media here, then Scan inbox. Re-scans are safe.</span><br>
+        <a href="{{ url_path(request, '/api/library/media') }}">JSON inventory</a>
+      </div>
     </div>
   </section>
 
