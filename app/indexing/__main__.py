@@ -12,10 +12,12 @@ from app.core.database import Base, SessionLocal, engine
 from app.indexing.embedding_service import index_visual_trace_embeddings
 from app.indexing.evaluation import evaluate_visual_search, load_evaluation_spec
 from app.indexing.language_traces import import_existing_stream_transcript
+from app.indexing.media_retrieval import DefaultMediaRetriever
 from app.indexing.qwen_backend import QwenSubprocessEmbeddingBackend
 from app.indexing.qwen_runtime import inspect_qwen_runtime
 from app.indexing.refinement import RefinementConfig, refine_visual_trace
 from app.indexing.service import VisualExtractionConfig, index_all_visual_media, index_visual_media
+from app.indexing.stream_media import sync_all_stream_media
 from app.indexing.visual_search import search_visual_embeddings
 from app.library_models import Embedding, IndexRun, Media, Trace  # noqa: F401 - registers indexing tables
 
@@ -39,7 +41,7 @@ def _parser() -> argparse.ArgumentParser:
 
     pending_parser = subparsers.add_parser(
         "index-pending",
-        help="Idempotently extract/reuse visual Traces for Library Media",
+        help="Idempotently extract/reuse visual Traces; remote Media is excluded unless explicitly enabled",
     )
     pending_parser.add_argument("--limit", type=int, default=None)
     pending_parser.add_argument(
@@ -49,6 +51,28 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional fixed video sample interval in seconds; omit to use adaptive-v1",
     )
     pending_parser.add_argument("--index-root", default=None)
+    pending_parser.add_argument(
+        "--include-remote",
+        action="store_true",
+        help="Explicitly permit on-demand downloads for remote Media during this bulk pass",
+    )
+
+    stream_sync_parser = subparsers.add_parser(
+        "sync-stream-media",
+        help="Represent existing livestream Streams as metadata-only YouTube Media and reuse stored captions",
+    )
+    stream_sync_parser.add_argument("--limit", type=int, default=None)
+    stream_sync_parser.add_argument(
+        "--no-language",
+        action="store_true",
+        help="Sync Media identity only; do not import existing JSON3 captions",
+    )
+
+    materialize_parser = subparsers.add_parser(
+        "materialize-media",
+        help="Diagnostic: materialize one Media source into scratch and verify cleanup after the lease closes",
+    )
+    materialize_parser.add_argument("media_id")
 
     embed_parser = subparsers.add_parser(
         "embed-visual",
@@ -113,7 +137,6 @@ def _root_from_args(value: str | None) -> Path:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    # Only create missing indexing tables; do not bootstrap/import the FastAPI app.
     Base.metadata.create_all(bind=engine)
 
     if args.command == "qwen-status":
@@ -129,6 +152,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "status":
             payload = {
                 "media": db.scalar(select(func.count()).select_from(Media)) or 0,
+                "youtubeMedia": db.scalar(
+                    select(func.count()).select_from(Media).where(Media.source_type == "youtube")
+                )
+                or 0,
                 "traces": db.scalar(select(func.count()).select_from(Trace)) or 0,
                 "visualTraces": db.scalar(
                     select(func.count()).select_from(Trace).where(Trace.trace_type == "visual")
@@ -141,6 +168,47 @@ def main(argv: list[str] | None = None) -> int:
                 "embeddings": db.scalar(select(func.count()).select_from(Embedding)) or 0,
                 "indexRuns": db.scalar(select(func.count()).select_from(IndexRun)) or 0,
             }
+            print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
+
+        if args.command == "sync-stream-media":
+            try:
+                result = sync_all_stream_media(
+                    db,
+                    import_language=not args.no_language,
+                    limit=args.limit,
+                )
+            except Exception as exc:
+                print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2))
+                return 1
+            print(json.dumps({"ok": True, "result": result.as_dict()}, indent=2, sort_keys=True))
+            return 0
+
+        if args.command == "materialize-media":
+            media = db.get(Media, args.media_id)
+            if media is None:
+                print(json.dumps({"ok": False, "error": f"Media not found: {args.media_id}"}, indent=2))
+                return 2
+            retriever = DefaultMediaRetriever()
+            try:
+                with retriever.materialize(media) as materialized:
+                    materialized_path = materialized.path
+                    during = {
+                        "pathName": materialized.path.name,
+                        "temporary": materialized.temporary,
+                        "sourceType": materialized.source_type,
+                        "sizeBytes": materialized.size_bytes,
+                        "existsDuringLease": materialized.path.is_file(),
+                    }
+                payload = {
+                    "ok": True,
+                    "mediaId": media.media_id,
+                    "materialized": during,
+                    "existsAfterLease": materialized_path.exists(),
+                }
+            except Exception as exc:
+                print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2))
+                return 1
             print(json.dumps(payload, indent=2, sort_keys=True))
             return 0
 
@@ -270,6 +338,7 @@ def main(argv: list[str] | None = None) -> int:
                 index_root=index_root,
                 config=config,
                 limit=args.limit,
+                include_remote=args.include_remote,
             )
         except Exception as exc:
             print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2))
@@ -280,6 +349,7 @@ def main(argv: list[str] | None = None) -> int:
                     "ok": True,
                     "count": len(results),
                     "samplingPolicy": config.sampling_policy,
+                    "includeRemote": args.include_remote,
                     "results": [result.as_dict() for result in results],
                 },
                 indent=2,
