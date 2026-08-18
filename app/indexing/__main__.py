@@ -18,7 +18,12 @@ def _parser() -> argparse.ArgumentParser:
 
     media_parser = subparsers.add_parser("index-media", help="Extract visual Traces for one Media record")
     media_parser.add_argument("media_id")
-    media_parser.add_argument("--interval", type=float, default=5.0, help="Video sample interval in seconds")
+    media_parser.add_argument(
+        "--interval",
+        type=float,
+        default=None,
+        help="Optional fixed video sample interval in seconds; omit to use adaptive-v1",
+    )
     media_parser.add_argument("--index-root", default=None)
 
     pending_parser = subparsers.add_parser(
@@ -26,7 +31,12 @@ def _parser() -> argparse.ArgumentParser:
         help="Idempotently extract/reuse visual Traces for Library Media",
     )
     pending_parser.add_argument("--limit", type=int, default=None)
-    pending_parser.add_argument("--interval", type=float, default=5.0, help="Video sample interval in seconds")
+    pending_parser.add_argument(
+        "--interval",
+        type=float,
+        default=None,
+        help="Optional fixed video sample interval in seconds; omit to use adaptive-v1",
+    )
     pending_parser.add_argument("--index-root", default=None)
 
     subparsers.add_parser("status", help="Print machine-readable indexing table counts")
@@ -92,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
                 {
                     "ok": True,
                     "count": len(results),
+                    "samplingPolicy": config.sampling_policy,
                     "results": [result.as_dict() for result in results],
                 },
                 indent=2,
