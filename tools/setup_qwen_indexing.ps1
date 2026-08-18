@@ -1,12 +1,27 @@
 $ErrorActionPreference = "Stop"
 
 $ProjectDir = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$RuntimeRoot = Join-Path $ProjectDir "data\qwen_indexing"
+$RuntimeConfigPath = Join-Path $ProjectDir "config\qwen-indexing-runtime.json"
+if (-not (Test-Path -LiteralPath $RuntimeConfigPath)) {
+    throw "Missing Qwen indexing runtime configuration: $RuntimeConfigPath"
+}
+$RuntimeConfig = Get-Content -LiteralPath $RuntimeConfigPath -Raw | ConvertFrom-Json
+
+$RuntimeRoot = Join-Path $ProjectDir ([string]$RuntimeConfig.runtimeRoot)
 $VenvDir = Join-Path $RuntimeRoot ".venv"
 $QwenRepo = Join-Path $RuntimeRoot "Qwen3-VL-Embedding"
-$ModelDir = Join-Path $RuntimeRoot "models\Qwen3-VL-Embedding-2B"
+$ModelDir = Join-Path (Join-Path $RuntimeRoot "models") ([string]$RuntimeConfig.model.directoryName)
 $AppPython = Join-Path $ProjectDir ".venv\Scripts\python.exe"
 $IndexPython = Join-Path $VenvDir "Scripts\python.exe"
+$FreezePath = Join-Path $RuntimeRoot "environment.freeze.txt"
+
+$TorchVersion = [string]$RuntimeConfig.torch.version
+$TorchvisionVersion = [string]$RuntimeConfig.torch.torchvisionVersion
+$TorchIndexUrl = [string]$RuntimeConfig.torch.indexUrl
+$QwenRepository = [string]$RuntimeConfig.qwenSource.repository
+$QwenCommit = [string]$RuntimeConfig.qwenSource.commit
+$ModelId = [string]$RuntimeConfig.model.id
+$ModelRevision = [string]$RuntimeConfig.model.revision
 
 function Write-Step([string]$Message) {
     Write-Host ""
@@ -35,9 +50,7 @@ function Get-BootstrapPython {
     }
 
     if (Get-Command py -ErrorAction SilentlyContinue) {
-        # Prefer 3.12 for broad ML-wheel compatibility, then the installed/current
-        # 3.13 generation, then 3.11. Never fall back to Python <3.11.
-        foreach ($Version in @("3.12", "3.13", "3.11")) {
+        foreach ($Version in @("3.13", "3.12", "3.11")) {
             $Args = @("-$Version")
             if (Test-PythonVersion -FilePath "py" -PrefixArgs $Args) {
                 return @{ FilePath = "py"; PrefixArgs = $Args; Label = "py -$Version" }
@@ -54,7 +67,7 @@ function Get-BootstrapPython {
         }
     }
 
-    throw "No Python 3.11+ interpreter is available to create the isolated Qwen indexing environment. Existing app .venv is optional. Install a supported Python separately or set up the app environment first; this script will not modify system Python."
+    throw "No Python 3.11+ interpreter is available to create the isolated Qwen indexing environment. Existing app .venv is optional. This script will not modify system Python."
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -83,25 +96,29 @@ Write-Step "Upgrading isolated packaging tools"
 & $IndexPython -m pip install --upgrade pip setuptools wheel
 if ($LASTEXITCODE -ne 0) { throw "Could not update pip/setuptools/wheel inside the indexing environment." }
 
-Write-Step "Installing PyTorch 2.8 CUDA 12.8 runtime in the isolated environment"
-& $IndexPython -m pip install torch==2.8.0 torchvision==0.23.0 --index-url https://download.pytorch.org/whl/cu128
+Write-Step "Installing pinned PyTorch $TorchVersion CUDA runtime"
+& $IndexPython -m pip install "torch==$TorchVersion" "torchvision==$TorchvisionVersion" --index-url $TorchIndexUrl
 if ($LASTEXITCODE -ne 0) {
-    throw "PyTorch 2.8 CUDA 12.8 installation failed. The existing app environment was not modified."
+    throw "Pinned PyTorch installation failed. The existing app environment was not modified."
 }
 
 if (-not (Test-Path -LiteralPath (Join-Path $QwenRepo ".git"))) {
     Write-Step "Cloning official Qwen3-VL-Embedding implementation"
-    & git clone --depth 1 https://github.com/QwenLM/Qwen3-VL-Embedding.git $QwenRepo
+    & git clone --no-checkout $QwenRepository $QwenRepo
     if ($LASTEXITCODE -ne 0) { throw "Could not clone Qwen3-VL-Embedding." }
-} else {
-    Write-Step "Refreshing existing Qwen3-VL-Embedding checkout"
-    & git -C $QwenRepo fetch origin main --depth 1
-    if ($LASTEXITCODE -ne 0) { throw "Could not fetch Qwen3-VL-Embedding main." }
-    & git -C $QwenRepo reset --hard origin/main
-    if ($LASTEXITCODE -ne 0) { throw "Could not reset Qwen3-VL-Embedding checkout to origin/main." }
 }
 
-Write-Step "Installing official Qwen dependencies into the isolated environment"
+Write-Step "Pinning Qwen3-VL-Embedding source to $QwenCommit"
+& git -C $QwenRepo fetch origin $QwenCommit --depth 1
+if ($LASTEXITCODE -ne 0) { throw "Could not fetch pinned Qwen source commit $QwenCommit." }
+& git -C $QwenRepo checkout --detach --force $QwenCommit
+if ($LASTEXITCODE -ne 0) { throw "Could not check out pinned Qwen source commit $QwenCommit." }
+$ResolvedQwenCommit = (& git -C $QwenRepo rev-parse HEAD).Trim()
+if ($ResolvedQwenCommit -ne $QwenCommit) {
+    throw "Qwen source pin mismatch: expected $QwenCommit, got $ResolvedQwenCommit."
+}
+
+Write-Step "Installing pinned Qwen source dependencies into the isolated environment"
 & $IndexPython -m pip install -e $QwenRepo
 if ($LASTEXITCODE -ne 0) {
     throw "Qwen dependency installation failed. The existing app environment was not modified."
@@ -111,12 +128,18 @@ if ($LASTEXITCODE -ne 0) {
 if ($LASTEXITCODE -ne 0) { throw "Could not install huggingface-hub in the indexing environment." }
 
 if (-not (Test-Path -LiteralPath (Join-Path $ModelDir "config.json"))) {
-    Write-Step "Downloading Qwen3-VL-Embedding-2B model"
+    Write-Step "Downloading pinned $ModelId model snapshot"
     New-Item -ItemType Directory -Force -Path $ModelDir | Out-Null
     $env:SHOCKS_QWEN_MODEL_DIR = $ModelDir
-    & $IndexPython -c "import os; from huggingface_hub import snapshot_download; snapshot_download(repo_id='Qwen/Qwen3-VL-Embedding-2B', local_dir=os.environ['SHOCKS_QWEN_MODEL_DIR'])"
-    if ($LASTEXITCODE -ne 0) { throw "Could not download Qwen3-VL-Embedding-2B." }
+    $env:SHOCKS_QWEN_MODEL_ID = $ModelId
+    $env:SHOCKS_QWEN_MODEL_REVISION = $ModelRevision
+    & $IndexPython -c "import os; from huggingface_hub import snapshot_download; snapshot_download(repo_id=os.environ['SHOCKS_QWEN_MODEL_ID'], revision=os.environ['SHOCKS_QWEN_MODEL_REVISION'], local_dir=os.environ['SHOCKS_QWEN_MODEL_DIR'])"
+    if ($LASTEXITCODE -ne 0) { throw "Could not download pinned Qwen3-VL-Embedding-2B model revision $ModelRevision." }
 }
+
+Write-Step "Recording resolved isolated package environment"
+& $IndexPython -m pip freeze | Set-Content -LiteralPath $FreezePath -Encoding UTF8
+if ($LASTEXITCODE -ne 0) { throw "Could not record isolated package environment." }
 
 Write-Step "Reporting isolated runtime"
 & $IndexPython -c "import sys, torch; print('python=' + sys.version.split()[0]); print('torch=' + torch.__version__); print('torch_cuda=' + str(torch.version.cuda)); print('cuda_available=' + str(torch.cuda.is_available())); print('gpu=' + (torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'none'))"
@@ -124,7 +147,8 @@ Write-Step "Reporting isolated runtime"
 Write-Host ""
 Write-Host "Isolated indexing environment ready."
 Write-Host "Python: $IndexPython"
-Write-Host "Qwen repo: $QwenRepo"
-Write-Host "Model: $ModelDir"
+Write-Host "Qwen source commit: $QwenCommit"
+Write-Host "Model revision: $ModelRevision"
+Write-Host "Resolved packages: $FreezePath"
 Write-Host "Benchmark:"
 Write-Host ('  "{0}" "{1}" --qwen-repo "{2}" --model-dir "{3}"' -f $IndexPython, (Join-Path $ProjectDir "tools\benchmark_qwen_embedding.py"), $QwenRepo, $ModelDir)
