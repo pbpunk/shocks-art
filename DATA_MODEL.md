@@ -1,5 +1,21 @@
 # Data Model
 
+## Media
+
+Generic Library source record independent of livestream-specific models. Stores source identity/location, title/filename, MIME/media kind, size and modification metadata, SHA-256 content identity, duration/dimensions, processing status, and source metadata. Local files are the current validation adapter; future archive-backed Media can use other source types without changing downstream indexing concepts.
+
+## Trace
+
+Timestamped evidence extracted from a Media item. A Trace has an extensible `trace_type` (initially visual; later language/OCR/metadata), millisecond start/end positions, optional text or generated artifact path, extractor/version/configuration identity, confidence, provenance, and metadata. Extraction identity is unique per Media/type/time/extractor/version/configuration so interrupted jobs can safely resume without duplicating evidence.
+
+## Embedding
+
+Regenerable vector representation of a Trace. Stores the Trace link, model ID, vector dimension, dtype, normalized flag, and raw vector bytes. A Trace/model/dimension tuple is unique so different embedding generations are never silently mixed.
+
+## IndexRun
+
+One observable indexing-stage attempt for a Media item. Stores stage, configuration hash, status, timing, error text, and stage statistics. Runs are historical attempts rather than canonical evidence; Trace/Embedding rows remain the durable derived output.
+
 ## Stream
 
 Root livestream asset. Stores YouTube identity, title, URL, duration, thumbnail, processing status, and schema version.
