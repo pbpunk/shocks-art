@@ -5,7 +5,13 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import Base
-from app.indexing.service import VisualExtractionConfig, index_visual_media
+from app.indexing.service import (
+    VisualExtractionConfig,
+    effective_sample_interval_seconds,
+    index_visual_media,
+    visual_sample_timestamps_ms,
+    visual_sampling_plan,
+)
 from app.library_models import Embedding, IndexRun, Media, Trace
 
 
@@ -164,6 +170,46 @@ def test_visual_extraction_creates_still_and_sparse_video_traces(tmp_path):
             assert (index_root / trace.artifact_path).is_file()
     finally:
         db.close()
+
+
+def test_adaptive_sampling_policy_is_duration_aware_and_bounded():
+    config = VisualExtractionConfig()
+    cases = [
+        (30.0, 5.0, 6),
+        (60.0, 5.0, 12),
+        (61.0, 10.0, 7),
+        (600.0, 10.0, 60),
+        (601.0, 30.0, 21),
+        (3600.0, 30.0, 120),
+        (3601.0, 60.0, 61),
+        (10800.0, 60.0, 180),
+        (28800.0, 120.0, 240),
+    ]
+
+    for duration, expected_interval, expected_count in cases:
+        media = Media(media_kind="video", duration_seconds=duration, filename=f"{int(duration)}.mp4")
+        timestamps = visual_sample_timestamps_ms(media, config)
+        assert effective_sample_interval_seconds(duration, config) == expected_interval
+        assert len(timestamps) == expected_count
+        assert len(timestamps) <= config.max_video_samples
+        assert timestamps == sorted(set(timestamps))
+
+    image = Media(media_kind="image", filename="still.jpg")
+    image_plan = visual_sampling_plan(image, config)
+    assert image_plan["samplingPolicy"] == "still-image"
+    assert image_plan["sampleCount"] == 1
+    assert image_plan["timestampsMs"] == [0]
+
+
+def test_fixed_sampling_override_remains_available():
+    config = VisualExtractionConfig(sample_interval_seconds=7.5)
+    media = Media(media_kind="video", duration_seconds=31.0, filename="override.mp4")
+
+    plan = visual_sampling_plan(media, config)
+
+    assert config.sampling_policy == "fixed"
+    assert plan["intervalSeconds"] == 7.5
+    assert plan["timestampsMs"] == [0, 7500, 15000, 22500, 30000]
 
 
 def test_visual_extraction_rerun_reuses_existing_traces(tmp_path):
