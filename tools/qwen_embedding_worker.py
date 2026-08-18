@@ -36,9 +36,23 @@ def _load_request(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("request must be a JSON object")
     operation = payload.get("operation")
+    if operation not in {"images", "text", "mixed"}:
+        raise ValueError("operation must be 'images', 'text', or 'mixed'")
+
+    if operation == "mixed":
+        items = payload.get("items")
+        if not isinstance(items, list) or not items:
+            raise ValueError("mixed request items must be a non-empty array")
+        for item in items:
+            if not isinstance(item, dict):
+                raise ValueError("mixed request items must be objects")
+            if item.get("kind") not in {"text", "image"}:
+                raise ValueError("mixed request item kind must be 'text' or 'image'")
+            if not isinstance(item.get("value"), str) or not item["value"]:
+                raise ValueError("mixed request item value must be a non-empty string")
+        return payload
+
     values = payload.get("values")
-    if operation not in {"images", "text"}:
-        raise ValueError("operation must be 'images' or 'text'")
     if not isinstance(values, list) or not values:
         raise ValueError("values must be a non-empty array")
     if not all(isinstance(value, str) and value for value in values):
@@ -49,6 +63,12 @@ def _load_request(path: Path) -> dict[str, Any]:
 def _write_response(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _model_input(kind: str, value: str, instruction: str) -> dict[str, str]:
+    if kind == "image":
+        return {"image": value, "instruction": instruction}
+    return {"text": value, "instruction": instruction}
 
 
 def main() -> int:
@@ -76,16 +96,17 @@ def main() -> int:
         torch_dtype=_torch_dtype(torch, args.dtype),
     )
 
-    values: list[str] = request["values"]
     operation = request["operation"]
-    vectors: list[list[float]] = []
+    if operation == "mixed":
+        items = [(item["kind"], item["value"]) for item in request["items"]]
+    else:
+        kind = "image" if operation == "images" else "text"
+        items = [(kind, value) for value in request["values"]]
 
-    for offset in range(0, len(values), args.batch_size):
-        batch = values[offset : offset + args.batch_size]
-        if operation == "images":
-            model_inputs = [{"image": value, "instruction": args.instruction} for value in batch]
-        else:
-            model_inputs = [{"text": value, "instruction": args.instruction} for value in batch]
+    vectors: list[list[float]] = []
+    for offset in range(0, len(items), args.batch_size):
+        batch = items[offset : offset + args.batch_size]
+        model_inputs = [_model_input(kind, value, args.instruction) for kind, value in batch]
         embedded = model.process(model_inputs)
         vectors.extend(embedded.float().cpu().tolist())
         del embedded
