@@ -4,7 +4,7 @@ import json
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 from app.indexing.embeddings import EmbeddingBackendError, Vector
 from app.indexing.qwen_runtime import PROJECT_ROOT, QwenRuntimeStatus, require_qwen_runtime
@@ -30,15 +30,43 @@ class QwenSubprocessEmbeddingBackend:
         values = [str(value) for value in texts]
         if not values:
             return []
-        return self._invoke("text", values)
+        return self._invoke({"operation": "text", "values": values}, expected_count=len(values))
 
     def embed_images(self, image_paths: Sequence[Path]) -> list[Vector]:
         values = [str(Path(path).resolve()) for path in image_paths]
         if not values:
             return []
-        return self._invoke("images", values)
+        return self._invoke({"operation": "images", "values": values}, expected_count=len(values))
 
-    def _invoke(self, operation: str, values: list[str]) -> list[Vector]:
+    def embed_text_and_images(
+        self,
+        texts: Sequence[str],
+        image_paths: Sequence[Path],
+    ) -> tuple[list[Vector], list[Vector]]:
+        """Encode text and image inputs in one isolated model load.
+
+        This is intentionally an optimization outside the minimal EmbeddingBackend
+        protocol. Localized refinement needs one query plus a small batch of dense
+        frames; loading Qwen separately for text and images would dominate runtime.
+        """
+
+        text_values = [str(value) for value in texts]
+        image_values = [str(Path(path).resolve()) for path in image_paths]
+        if not text_values and not image_values:
+            return [], []
+        items: list[dict[str, str]] = [
+            {"kind": "text", "value": value} for value in text_values
+        ] + [
+            {"kind": "image", "value": value} for value in image_values
+        ]
+        vectors = self._invoke(
+            {"operation": "mixed", "items": items},
+            expected_count=len(items),
+        )
+        text_count = len(text_values)
+        return vectors[:text_count], vectors[text_count:]
+
+    def _invoke(self, payload: dict[str, Any], *, expected_count: int) -> list[Vector]:
         paths = self.runtime_status.paths
         config = self.runtime_status.config
         worker = self.project_root / "tools" / "qwen_embedding_worker.py"
@@ -49,10 +77,7 @@ class QwenSubprocessEmbeddingBackend:
         with tempfile.TemporaryDirectory(prefix="embedding-request-", dir=paths.runtime_root) as temp_dir:
             request_path = Path(temp_dir) / "request.json"
             response_path = Path(temp_dir) / "response.json"
-            request_path.write_text(
-                json.dumps({"operation": operation, "values": values}),
-                encoding="utf-8",
-            )
+            request_path.write_text(json.dumps(payload), encoding="utf-8")
             command = [
                 str(paths.python),
                 str(worker),
@@ -92,14 +117,14 @@ class QwenSubprocessEmbeddingBackend:
                 raise EmbeddingBackendError("Qwen embedding worker completed without a response file.")
 
             try:
-                payload = json.loads(response_path.read_text(encoding="utf-8"))
-                vectors = payload["vectors"]
+                response = json.loads(response_path.read_text(encoding="utf-8"))
+                vectors = response["vectors"]
             except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
                 raise EmbeddingBackendError(f"Qwen embedding worker returned an invalid response: {exc}") from exc
 
-        if not isinstance(vectors, list) or len(vectors) != len(values):
+        if not isinstance(vectors, list) or len(vectors) != expected_count:
             raise EmbeddingBackendError(
-                f"Qwen embedding worker returned {len(vectors) if isinstance(vectors, list) else 'invalid'} vectors for {len(values)} inputs."
+                f"Qwen embedding worker returned {len(vectors) if isinstance(vectors, list) else 'invalid'} vectors for {expected_count} inputs."
             )
         materialized = [[float(value) for value in vector] for vector in vectors]
         for index, vector in enumerate(materialized):
