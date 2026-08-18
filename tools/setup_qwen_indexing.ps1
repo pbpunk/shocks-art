@@ -13,9 +13,50 @@ function Write-Step([string]$Message) {
     Write-Host "==> $Message"
 }
 
-if (-not (Test-Path -LiteralPath $AppPython)) {
-    throw "Expected the existing app interpreter at $AppPython. Run the normal app setup first."
+function Test-PythonVersion {
+    param(
+        [string]$FilePath,
+        [string[]]$PrefixArgs = @()
+    )
+    try {
+        & $FilePath @PrefixArgs -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)" *> $null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    }
 }
+
+function Get-BootstrapPython {
+    if (Test-Path -LiteralPath $AppPython) {
+        if (-not (Test-PythonVersion -FilePath $AppPython)) {
+            throw "Existing app interpreter at $AppPython is older than Python 3.11 and cannot bootstrap Qwen indexing."
+        }
+        return @{ FilePath = $AppPython; PrefixArgs = @(); Label = $AppPython }
+    }
+
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        # Prefer 3.12 for broad ML-wheel compatibility, then the installed/current
+        # 3.13 generation, then 3.11. Never fall back to Python <3.11.
+        foreach ($Version in @("3.12", "3.13", "3.11")) {
+            $Args = @("-$Version")
+            if (Test-PythonVersion -FilePath "py" -PrefixArgs $Args) {
+                return @{ FilePath = "py"; PrefixArgs = $Args; Label = "py -$Version" }
+            }
+        }
+        if (Test-PythonVersion -FilePath "py" -PrefixArgs @("-3")) {
+            return @{ FilePath = "py"; PrefixArgs = @("-3"); Label = "py -3" }
+        }
+    }
+
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        if (Test-PythonVersion -FilePath "python") {
+            return @{ FilePath = "python"; PrefixArgs = @(); Label = "python" }
+        }
+    }
+
+    throw "No Python 3.11+ interpreter is available to create the isolated Qwen indexing environment. Existing app .venv is optional. Install a supported Python separately or set up the app environment first; this script will not modify system Python."
+}
+
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
     throw "git is required to fetch the official Qwen3-VL-Embedding implementation."
 }
@@ -23,9 +64,18 @@ if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
 New-Item -ItemType Directory -Force -Path $RuntimeRoot | Out-Null
 
 if (-not (Test-Path -LiteralPath $IndexPython)) {
-    Write-Step "Creating isolated indexing virtual environment"
-    & $AppPython -m venv $VenvDir
-    if ($LASTEXITCODE -ne 0) { throw "Could not create isolated indexing virtual environment." }
+    $Bootstrap = Get-BootstrapPython
+    Write-Step "Creating isolated indexing virtual environment with $($Bootstrap.Label)"
+    $BootstrapArgs = @($Bootstrap.PrefixArgs)
+    & $Bootstrap.FilePath @BootstrapArgs -m venv $VenvDir
+    if ($LASTEXITCODE -ne 0) { throw "Could not create isolated indexing virtual environment with $($Bootstrap.Label)." }
+}
+
+if (-not (Test-Path -LiteralPath $IndexPython)) {
+    throw "Isolated indexing interpreter was not created at $IndexPython."
+}
+if (-not (Test-PythonVersion -FilePath $IndexPython)) {
+    throw "Isolated indexing interpreter at $IndexPython is older than Python 3.11. Delete data\qwen_indexing\.venv and rerun setup with a supported bootstrap interpreter."
 }
 
 Write-Step "Upgrading isolated packaging tools"
