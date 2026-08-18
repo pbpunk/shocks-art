@@ -18,12 +18,37 @@ SUPPORTED_SUFFIXES = SUPPORTED_VIDEO_SUFFIXES | SUPPORTED_IMAGE_SUFFIXES
 
 
 @dataclass(frozen=True)
+class IngestFailure:
+    path: str
+    error_type: str
+    message: str
+
+    def as_dict(self) -> dict[str, str]:
+        return {
+            "path": self.path,
+            "errorType": self.error_type,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
 class IngestResult:
     discovered: int = 0
     created: int = 0
     updated: int = 0
     skipped: int = 0
     errors: int = 0
+    failures: tuple[IngestFailure, ...] = ()
+
+    def as_dict(self) -> dict:
+        return {
+            "discovered": self.discovered,
+            "created": self.created,
+            "updated": self.updated,
+            "skipped": self.skipped,
+            "errors": self.errors,
+            "failures": [failure.as_dict() for failure in self.failures],
+        }
 
 
 def media_kind_for_path(path: Path) -> str:
@@ -89,12 +114,20 @@ def scan_media_files(root: Path) -> list[Path]:
     )
 
 
+def display_ingest_path(path: Path, root: Path) -> str:
+    """Return a useful diagnostic path without exposing an absolute workstation path."""
+    try:
+        return str(path.resolve().relative_to(root.resolve()))
+    except (OSError, ValueError):
+        return path.name
+
+
 def ingest_local_media(db: Session, root: Path) -> IngestResult:
     files = scan_media_files(root)
     created = 0
     updated = 0
     skipped = 0
-    errors = 0
+    failures: list[IngestFailure] = []
 
     for path in files:
         try:
@@ -132,7 +165,7 @@ def ingest_local_media(db: Session, root: Path) -> IngestResult:
             media.height = probe.get("height", 0)
             media.processing_status = "discovered"
             media.metadata_json = {
-                "relative_path": str(resolved.relative_to(root.resolve())) if resolved.is_relative_to(root.resolve()) else resolved.name,
+                "relative_path": display_ingest_path(resolved, root),
                 "ffprobe_available": bool(shutil.which("ffprobe")),
             }
             if existing:
@@ -140,8 +173,15 @@ def ingest_local_media(db: Session, root: Path) -> IngestResult:
             else:
                 db.add(media)
                 created += 1
-        except (OSError, ValueError):
-            errors += 1
+        except Exception as exc:
+            db.rollback()
+            failures.append(
+                IngestFailure(
+                    path=display_ingest_path(path, root),
+                    error_type=type(exc).__name__,
+                    message=str(exc).strip() or repr(exc),
+                )
+            )
 
     db.commit()
     return IngestResult(
@@ -149,5 +189,6 @@ def ingest_local_media(db: Session, root: Path) -> IngestResult:
         created=created,
         updated=updated,
         skipped=skipped,
-        errors=errors,
+        errors=len(failures),
+        failures=tuple(failures),
     )
