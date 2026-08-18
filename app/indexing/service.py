@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass
@@ -103,14 +104,46 @@ class FfmpegFrameBackend:
 
 @dataclass(frozen=True)
 class VisualExtractionConfig:
-    sample_interval_seconds: float = 5.0
+    """Configuration for fixed or adaptive visual sampling.
+
+    ``sample_interval_seconds`` is an explicit fixed-interval override retained
+    for experiments and backwards-compatible tests. When omitted, adaptive-v1
+    selects an interval from the duration bands and then widens it as needed to
+    respect ``max_video_samples``.
+    """
+
+    sample_interval_seconds: float | None = None
+    short_video_max_seconds: float = 60.0
+    medium_video_max_seconds: float = 600.0
+    long_video_max_seconds: float = 3600.0
+    short_interval_seconds: float = 5.0
+    medium_interval_seconds: float = 10.0
+    long_interval_seconds: float = 30.0
+    very_long_interval_seconds: float = 60.0
+    max_video_samples: int = 240
     artifact_format: str = "jpg"
 
     def __post_init__(self) -> None:
-        if self.sample_interval_seconds <= 0:
-            raise ValueError("sample_interval_seconds must be greater than zero")
+        if self.sample_interval_seconds is not None and self.sample_interval_seconds <= 0:
+            raise ValueError("sample_interval_seconds must be greater than zero when provided")
+        if not (0 < self.short_video_max_seconds < self.medium_video_max_seconds < self.long_video_max_seconds):
+            raise ValueError("video duration thresholds must be positive and strictly increasing")
+        intervals = (
+            self.short_interval_seconds,
+            self.medium_interval_seconds,
+            self.long_interval_seconds,
+            self.very_long_interval_seconds,
+        )
+        if any(interval <= 0 for interval in intervals):
+            raise ValueError("adaptive sample intervals must be greater than zero")
+        if self.max_video_samples <= 0:
+            raise ValueError("max_video_samples must be greater than zero")
         if not self.artifact_format or not self.artifact_format.replace("-", "").isalnum():
             raise ValueError("artifact_format must be a simple file extension")
+
+    @property
+    def sampling_policy(self) -> str:
+        return "fixed" if self.sample_interval_seconds is not None else "adaptive-v1"
 
     def as_payload(self) -> dict:
         return asdict(self)
@@ -119,6 +152,80 @@ class VisualExtractionConfig:
     def configuration_hash(self) -> str:
         encoded = json.dumps(self.as_payload(), sort_keys=True, separators=(",", ":")).encode("utf-8")
         return hashlib.sha256(encoded).hexdigest()
+
+
+def effective_sample_interval_seconds(duration_seconds: float | None, config: VisualExtractionConfig) -> float:
+    """Return the configured interval for one video's duration.
+
+    The maximum-sample guard only widens intervals; it never makes the selected
+    duration band denser.
+    """
+
+    if config.sample_interval_seconds is not None:
+        return config.sample_interval_seconds
+
+    duration = max(0.0, float(duration_seconds or 0.0))
+    if duration <= config.short_video_max_seconds:
+        base_interval = config.short_interval_seconds
+    elif duration <= config.medium_video_max_seconds:
+        base_interval = config.medium_interval_seconds
+    elif duration <= config.long_video_max_seconds:
+        base_interval = config.long_interval_seconds
+    else:
+        base_interval = config.very_long_interval_seconds
+
+    if duration <= 0:
+        return base_interval
+
+    cap_interval = float(max(1, math.ceil(duration / config.max_video_samples)))
+    return max(base_interval, cap_interval)
+
+
+def video_sample_timestamps_ms(duration_seconds: float | None, config: VisualExtractionConfig) -> list[int]:
+    interval_ms = max(1, int(round(effective_sample_interval_seconds(duration_seconds, config) * 1000)))
+    duration_ms = max(0, int(round((duration_seconds or 0) * 1000)))
+    if duration_ms <= 0:
+        return [0]
+    return list(range(0, duration_ms, interval_ms))
+
+
+def visual_sampling_plan(media: Media, config: VisualExtractionConfig) -> dict:
+    """Return a non-mutating, machine-readable sampling plan for one Media item."""
+
+    if media.media_kind == "image":
+        return {
+            "mediaId": media.media_id,
+            "filename": media.filename,
+            "kind": media.media_kind,
+            "durationSeconds": media.duration_seconds,
+            "samplingPolicy": "still-image",
+            "intervalSeconds": None,
+            "sampleCount": 1,
+            "timestampsMs": [0],
+        }
+    if media.media_kind != "video":
+        return {
+            "mediaId": media.media_id,
+            "filename": media.filename,
+            "kind": media.media_kind,
+            "durationSeconds": media.duration_seconds,
+            "samplingPolicy": "unsupported",
+            "intervalSeconds": None,
+            "sampleCount": 0,
+            "timestampsMs": [],
+        }
+
+    timestamps = video_sample_timestamps_ms(media.duration_seconds, config)
+    return {
+        "mediaId": media.media_id,
+        "filename": media.filename,
+        "kind": media.media_kind,
+        "durationSeconds": media.duration_seconds,
+        "samplingPolicy": config.sampling_policy,
+        "intervalSeconds": effective_sample_interval_seconds(media.duration_seconds, config),
+        "sampleCount": len(timestamps),
+        "timestampsMs": timestamps,
+    }
 
 
 @dataclass(frozen=True)
@@ -140,12 +247,7 @@ def visual_sample_timestamps_ms(media: Media, config: VisualExtractionConfig) ->
         return [0]
     if media.media_kind != "video":
         return []
-
-    interval_ms = int(round(config.sample_interval_seconds * 1000))
-    duration_ms = max(0, int(round((media.duration_seconds or 0) * 1000)))
-    if duration_ms <= 0:
-        return [0]
-    return list(range(0, duration_ms, interval_ms))
+    return video_sample_timestamps_ms(media.duration_seconds, config)
 
 
 def _backend_artifact_generation(backend: FrameExtractionBackend, config: VisualExtractionConfig) -> str:
@@ -250,6 +352,9 @@ def index_visual_media(
                 still_image=media.media_kind == "image",
             )
 
+            effective_interval = (
+                None if media.media_kind == "image" else effective_sample_interval_seconds(media.duration_seconds, config)
+            )
             provenance = {
                 "sourceType": media.source_type,
                 "sourceSha256": media.checksum_sha256,
@@ -257,7 +362,9 @@ def index_visual_media(
             }
             metadata = {
                 "artifactFormat": config.artifact_format,
-                "sampleIntervalSeconds": config.sample_interval_seconds,
+                "samplingPolicy": "still-image" if media.media_kind == "image" else config.sampling_policy,
+                "sampleIntervalSeconds": effective_interval,
+                "maxVideoSamples": config.max_video_samples,
             }
 
             if existing is not None:
