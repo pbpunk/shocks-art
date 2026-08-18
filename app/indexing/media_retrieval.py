@@ -6,7 +6,7 @@ import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterator, Protocol
+from typing import ContextManager, Iterator, Protocol
 
 from app.core.config import ROOT_DIR, get_settings
 from app.library_models import Media
@@ -25,8 +25,7 @@ class MaterializedMedia:
 
 
 class MediaRetriever(Protocol):
-    @contextmanager
-    def materialize(self, media: Media) -> Iterator[MaterializedMedia]: ...
+    def materialize(self, media: Media) -> ContextManager[MaterializedMedia]: ...
 
 
 class LocalMediaRetriever:
