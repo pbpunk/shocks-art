@@ -129,6 +129,89 @@ function Test-HttpEndpoint {
     }
 }
 
+function Get-TailscaleRouteProperty {
+    param(
+        $Object,
+        [string]$Name
+    )
+    if (-not $Object) { return $null }
+    $Property = $Object.PSObject.Properties[$Name]
+    if (-not $Property) { return $null }
+    return $Property.Value
+}
+
+function Get-TailscaleStatus {
+    param([string]$Command = "funnel")
+    try {
+        $Json = & tailscale.exe $Command status --json 2>$null
+        if ($LASTEXITCODE -ne 0 -or -not $Json) { return $null }
+        return ($Json | ConvertFrom-Json)
+    } catch {
+        return $null
+    }
+}
+
+function Test-TailscaleRouteContract {
+    param(
+        [Parameter(Mandatory = $true)]$Status,
+        [int]$HttpsPort,
+        [string]$Path,
+        [string]$Target,
+        [switch]$RequireFunnel,
+        [switch]$RequirePrivate
+    )
+
+    $HostName = ([Uri]$PublicBaseUrl).Host
+    $ListenerKey = "$HostName`:$HttpsPort"
+    $Listener = Get-TailscaleRouteProperty -Object $Status.Web -Name $ListenerKey
+    if (-not $Listener -and $Status.Web) {
+        $Listener = @(
+            $Status.Web.PSObject.Properties |
+                Where-Object { $_.Name -like "*:$HttpsPort" } |
+                Select-Object -First 1 -ExpandProperty Value
+        )[0]
+    }
+
+    $Handler = $null
+    if ($Listener) {
+        $Handler = Get-TailscaleRouteProperty -Object $Listener.Handlers -Name $Path
+    }
+
+    $RoutePresent = $null -ne $Handler
+    $ActualTarget = if ($Handler -and $Handler.Proxy) { [string]$Handler.Proxy } else { "" }
+    $TargetMatches = $RoutePresent -and $ActualTarget -eq $Target
+    $AllowFunnel = Get-TailscaleRouteProperty -Object $Status.AllowFunnel -Name $ListenerKey
+    $IsFunnel = $AllowFunnel -eq $true
+    $Mode = if ($IsFunnel) { "Funnel/public" } else { "Serve/tailnet-only" }
+
+    $Ok = $RoutePresent -and $TargetMatches
+    if ($RequireFunnel) { $Ok = $Ok -and $IsFunnel }
+    if ($RequirePrivate) { $Ok = $Ok -and -not $IsFunnel }
+
+    $Problems = @()
+    if (-not $RoutePresent) {
+        $Problems += "$Path is missing on HTTPS $HttpsPort"
+    } elseif (-not $TargetMatches) {
+        $Problems += "$Path points to '$ActualTarget' instead of '$Target'"
+    }
+    if ($RequireFunnel -and -not $IsFunnel) {
+        $Problems += "HTTPS $HttpsPort has been switched back to Serve/tailnet-only; run Funnel for the shared 443 listener"
+    }
+    if ($RequirePrivate -and $IsFunnel) {
+        $Problems += "HTTPS $HttpsPort is Funnel/public but should remain private Serve"
+    }
+
+    return [pscustomobject]@{
+        Ok = [bool]$Ok
+        Mode = $Mode
+        ListenerKey = $ListenerKey
+        RoutePresent = [bool]$RoutePresent
+        TargetMatches = [bool]$TargetMatches
+        Target = $ActualTarget
+        Message = ($Problems -join "; ")
+    }
+}
+
 function Wait-AppHealth {
     param([int]$TimeoutSeconds = $StartupTimeoutSeconds)
     $Stopwatch = [Diagnostics.Stopwatch]::StartNew()
@@ -195,11 +278,46 @@ function Set-AppTailscaleRoutes {
     } catch {
         Write-Warning "Could not configure private Serve route: $($_.Exception.Message). Local app remains healthy."
     }
+
+    $Status = Get-TailscaleStatus -Command "funnel"
+    if ($Status) {
+        $PublicRoute = Test-TailscaleRouteContract -Status $Status -HttpsPort $PublicPort -Path $PublicPath -Target $Target -RequireFunnel
+        if (-not $PublicRoute.Ok) {
+            $PublicOk = $false
+            Write-Warning "Public Funnel verification failed: $($PublicRoute.Message). Local app remains healthy."
+        }
+
+        $PrivateRoute = Test-TailscaleRouteContract -Status $Status -HttpsPort $PrivatePort -Path $PrivatePath -Target $Target -RequirePrivate
+        if (-not $PrivateRoute.Ok) {
+            $PrivateOk = $false
+            Write-Warning "Private Serve verification failed: $($PrivateRoute.Message). Local app remains healthy."
+        }
+    } else {
+        Write-Warning "Could not inspect Tailscale Serve/Funnel status. Local app remains healthy."
+    }
+
     return @{ PublicOk = $PublicOk; PrivateOk = $PrivateOk; Target = $Target }
 }
 
 function Test-PublicContract {
     param([switch]$WarnOnly)
+    $PublicPort = if ($Manifest.network.public.httpsPort) { [int]$Manifest.network.public.httpsPort } else { 443 }
+    $PublicPath = if ($Manifest.network.public.path) { [string]$Manifest.network.public.path } else { $Route }
+    $Target = Get-TailscaleUpstream
+    $Status = Get-TailscaleStatus -Command "funnel"
+    if (-not $Status) {
+        $Message = "Public verification failed: could not inspect Tailscale Serve/Funnel status for HTTPS $PublicPort"
+        if ($WarnOnly) { Write-Warning $Message; return $false }
+        throw $Message
+    }
+
+    $PublicRoute = Test-TailscaleRouteContract -Status $Status -HttpsPort $PublicPort -Path $PublicPath -Target $Target -RequireFunnel
+    if (-not $PublicRoute.Ok) {
+        $Message = "Public verification failed: $($PublicRoute.Message)"
+        if ($WarnOnly) { Write-Warning $Message; return $false }
+        throw $Message
+    }
+
     $Checks = @(
         @{ Name = "HTML"; Url = "$PublicBaseUrl$Route/" },
         @{ Name = "health"; Url = "$PublicBaseUrl$Route/health" },
