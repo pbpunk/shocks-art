@@ -24,6 +24,10 @@
     "file": "data/runtime.json",
     "logsDir": "data/logs"
   },
+  "backlog": {
+    "file": "jarvis.backlog.json",
+    "schemaVersion": 1
+  },
   "network": {
     "public": {
       "httpsPort": 443,
