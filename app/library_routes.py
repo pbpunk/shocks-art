@@ -1,25 +1,30 @@
 import os
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.indexing.embeddings import EmbeddingBackendError
 from app.indexing.environment import collect_indexing_environment
+from app.indexing.qwen_backend import QwenSubprocessEmbeddingBackend
 from app.indexing.service import (
     VisualExtractionConfig,
     effective_sample_interval_seconds,
     video_sample_timestamps_ms,
     visual_sampling_plan,
 )
-from app.library_models import Media
+from app.indexing.visual_search import search_visual_embeddings
+from app.library_models import Media, Trace
 from app.services.library import IngestResult, ingest_local_media, scan_media_files
 
 
@@ -29,6 +34,11 @@ APP_ID = "shocks-art"
 APP_NAME = "Shocks Art"
 APP_ROUTE = os.getenv("APP_ROUTE", "/shocks_art")
 APP_STARTED_AT = datetime.now(timezone.utc).isoformat()
+
+
+class VisualSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=500)
+    top_k: int = Field(default=10, ge=1, le=50)
 
 
 def url_path(request: Request, path: str) -> str:
@@ -86,6 +96,29 @@ def ingest_summary_message(result: IngestResult) -> str:
         if len(result.failures) > 3:
             message += f" | +{len(result.failures) - 3} more (see /api/library/ingest)."
     return message
+
+
+def _safe_trace_artifact(trace: Trace) -> Path:
+    index_root = Path(get_settings().library_index_path).resolve()
+    if not trace.artifact_path:
+        raise HTTPException(status_code=404, detail="Trace has no generated artifact")
+    candidate = (index_root / trace.artifact_path).resolve()
+    if candidate != index_root and index_root not in candidate.parents:
+        raise HTTPException(status_code=404, detail="Trace artifact is outside the Library index")
+    if not candidate.is_file():
+        raise HTTPException(status_code=404, detail="Trace artifact is missing")
+    return candidate
+
+
+def _format_timestamp(milliseconds: int, *, still_image: bool = False) -> str:
+    if still_image:
+        return "Still image"
+    total_seconds = max(0, milliseconds // 1000)
+    hours, remainder = divmod(total_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}:{minutes:02d}:{seconds:02d}"
+    return f"{minutes:d}:{seconds:02d}"
 
 
 @router.get("/health")
@@ -156,6 +189,107 @@ def library_media_inventory(
         },
         "items": [media_inventory_item(media) for media in items],
     }
+
+
+@router.post("/api/library/search/visual")
+def library_visual_search(
+    request: Request,
+    payload: VisualSearchRequest,
+    db: Session = Depends(get_db),
+):
+    """Embed a text query in the isolated Qwen runtime and rank persisted visual vectors.
+
+    Filename/title metadata is joined only after semantic scoring and is never an
+    input to the query embedding or cosine rank.
+    """
+
+    semantic_query = payload.query.strip()
+    if not semantic_query:
+        raise HTTPException(status_code=422, detail="query must not be blank")
+
+    try:
+        backend = QwenSubprocessEmbeddingBackend()
+        query_started = time.perf_counter()
+        vectors = backend.embed_text([semantic_query])
+        query_embedding_ms = (time.perf_counter() - query_started) * 1000.0
+        if len(vectors) != 1:
+            raise EmbeddingBackendError(
+                f"Qwen returned {len(vectors)} vectors for one semantic query"
+            )
+        result = search_visual_embeddings(
+            db,
+            query_vector=vectors[0],
+            model_id=backend.model_id,
+            dimension=backend.dimension,
+            top_k=payload.top_k,
+        )
+    except EmbeddingBackendError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+    trace_ids = [match.trace_id for match in result.matches]
+    rows = list(
+        db.execute(
+            select(Trace, Media)
+            .join(Media, Trace.media_id == Media.media_id)
+            .where(Trace.trace_id.in_(trace_ids))
+        ).all()
+    ) if trace_ids else []
+    by_trace_id = {trace.trace_id: (trace, media) for trace, media in rows}
+
+    matches = []
+    for match in result.matches:
+        trace_media = by_trace_id.get(match.trace_id)
+        if trace_media is None:
+            continue
+        trace, media = trace_media
+        matches.append(
+            {
+                **match.as_dict(),
+                "title": media.title or media.filename,
+                "filename": media.filename,
+                "kind": media.media_kind,
+                "timestampLabel": _format_timestamp(
+                    trace.start_ms,
+                    still_image=media.media_kind == "image",
+                ),
+                "thumbnailUrl": url_path(request, f"/api/library/traces/{trace.trace_id}/artifact"),
+                "provenance": {
+                    "traceExtractor": trace.extractor,
+                    "traceExtractorVersion": trace.extractor_version,
+                    "traceConfigurationHash": trace.configuration_hash,
+                    "embeddingGeneration": result.model_id,
+                    "embeddingDimension": result.dimension,
+                },
+            }
+        )
+
+    return {
+        "schemaVersion": 1,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "mutatesState": False,
+        "query": semantic_query,
+        "queryEmbeddingMs": round(query_embedding_ms, 4),
+        "scoringIsolation": "filename/title are presentation metadata only and are not inputs to the semantic score",
+        "result": {
+            **result.as_dict(),
+            "matches": matches,
+        },
+    }
+
+
+@router.get("/api/library/traces/{trace_id}/artifact")
+def library_trace_artifact(trace_id: str, db: Session = Depends(get_db)):
+    """Serve a generated Trace artifact only when confined to LIBRARY_INDEX_PATH."""
+
+    trace = db.get(Trace, trace_id)
+    if trace is None or trace.trace_type != "visual":
+        raise HTTPException(status_code=404, detail="Visual Trace not found")
+    artifact = _safe_trace_artifact(trace)
+    return FileResponse(
+        artifact,
+        media_type="image/jpeg",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.get("/api/library/indexing/sampling-plan")
