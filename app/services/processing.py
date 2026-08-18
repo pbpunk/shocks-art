@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
 from app.core.database import SessionLocal
+from app.indexing.stream_media import sync_stream_media
 from app.models import AnalysisRun, CandidateWindow, Stream
 from app.services.gemini import GeminiAnalyzer, debug_log_path, raw_response_path
 from app.services.repository import create_analysis_run, save_candidates, upsert_stream
@@ -46,6 +47,11 @@ def discover_and_store_streams(db: Session, youtube_client: YouTubeClient | None
     updated = 0
     transcripts_available = 0
     transcripts_missing = 0
+    library_media_created = 0
+    library_media_updated = 0
+    language_traces_created = 0
+    language_traces_reused = 0
+    library_sync_errors = 0
     for stream_data in discovered:
         stream, was_created = upsert_stream(db, stream_data)
         created += int(was_created)
@@ -55,6 +61,19 @@ def discover_and_store_streams(db: Session, youtube_client: YouTubeClient | None
             transcripts_available += 1
         else:
             transcripts_missing += 1
+        try:
+            _, media_created, trace_created, trace_reused, _ = sync_stream_media(
+                db,
+                stream,
+                import_language=True,
+            )
+            library_media_created += int(media_created)
+            library_media_updated += int(not media_created)
+            language_traces_created += trace_created
+            language_traces_reused += trace_reused
+        except Exception:
+            db.rollback()
+            library_sync_errors += 1
     db.commit()
     return {
         "discovered": len(discovered),
@@ -62,6 +81,11 @@ def discover_and_store_streams(db: Session, youtube_client: YouTubeClient | None
         "updated": updated,
         "transcripts_available": transcripts_available,
         "transcripts_missing": transcripts_missing,
+        "library_media_created": library_media_created,
+        "library_media_updated": library_media_updated,
+        "language_traces_created": language_traces_created,
+        "language_traces_reused": language_traces_reused,
+        "library_sync_errors": library_sync_errors,
     }
 
 
@@ -98,6 +122,10 @@ def analyze_existing_run(db: Session, run_id: str, analyzer: GeminiAnalyzer | No
             f"model: {run.model}\nstream: {stream.title}\nurl: {stream.url}\nvideo_id: {stream.source_video_id}",
         )
         transcript = ensure_stream_transcript(db, stream, fetch_missing=True)
+        try:
+            sync_stream_media(db, stream, import_language=True)
+        except Exception:
+            db.rollback()
         append_debug_log(
             run,
             "TRANSCRIPT CAPTURE",
