@@ -122,3 +122,64 @@ def test_media_inventory_is_machine_readable_and_prefix_safe(client, db_session)
     assert item["sha256Short"] == "a" * 12
     assert item["relativePath"] == "folder/example.mp4"
     assert "C:/private/library" not in prefixed.text
+
+
+def test_sampling_plan_api_is_non_mutating_prefix_safe_and_bounded(client, db_session):
+    short = Media(
+        source_type="local",
+        source_id="C:/private/library/short.mp4",
+        source_path="C:/private/library/short.mp4",
+        title="Short",
+        filename="short.mp4",
+        mime_type="video/mp4",
+        media_kind="video",
+        size_bytes=1,
+        source_modified_ns=1,
+        checksum_sha256="b" * 64,
+        duration_seconds=32.2,
+        width=1920,
+        height=1080,
+    )
+    still = Media(
+        source_type="local",
+        source_id="C:/private/library/still.jpg",
+        source_path="C:/private/library/still.jpg",
+        title="Still",
+        filename="still.jpg",
+        mime_type="image/jpeg",
+        media_kind="image",
+        size_bytes=1,
+        source_modified_ns=1,
+        checksum_sha256="c" * 64,
+        width=1000,
+        height=1000,
+    )
+    db_session.add_all([short, still])
+    db_session.commit()
+
+    local = client.get("/api/library/indexing/sampling-plan")
+    prefixed = client.get("/shocks_art/api/library/indexing/sampling-plan")
+
+    assert local.status_code == 200
+    assert prefixed.status_code == 200
+    payload = prefixed.json()
+    assert payload["schemaVersion"] == 1
+    assert payload["mutatesState"] is False
+    assert payload["configuration"]["samplingPolicy"] == "adaptive-v1"
+    assert payload["summary"]["media"] == 2
+    assert payload["summary"]["video"] == 1
+    assert payload["summary"]["image"] == 1
+    assert payload["summary"]["expectedVisualTraces"] == 8
+    assert payload["summary"]["maxVideoSamples"] == 240
+
+    short_plan = next(item for item in payload["items"] if item["filename"] == "short.mp4")
+    assert short_plan["intervalSeconds"] == 5.0
+    assert short_plan["sampleCount"] == 7
+    assert short_plan["timestampsMs"] == [0, 5000, 10000, 15000, 20000, 25000, 30000]
+
+    references = {item["label"]: item for item in payload["referenceDurations"]}
+    assert references["3 hours"]["intervalSeconds"] == 60.0
+    assert references["3 hours"]["sampleCount"] == 180
+    assert references["8 hours"]["intervalSeconds"] == 120.0
+    assert references["8 hours"]["sampleCount"] == 240
+    assert "C:/private/library" not in prefixed.text
