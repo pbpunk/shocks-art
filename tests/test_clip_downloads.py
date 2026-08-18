@@ -1,7 +1,13 @@
 from pathlib import Path
 
 from app.models import DerivedAsset
-from app.services.clip_download import generate_clip_file, read_progress
+from app.services.clip_download import (
+    ClipDownloadError,
+    YTDLP_EXTRACTOR_ARGS,
+    YTDLP_FORMATS,
+    generate_clip_file,
+    read_progress,
+)
 from tests.test_ranking_exports_api import create_candidate
 
 
@@ -85,8 +91,64 @@ def test_generate_clip_file_uses_ytdlp_and_ffmpeg(db_session, valid_candidate_da
     assert output == clip_dir / f"{candidate.candidate_window_id}.mp4"
     assert output.read_bytes() == b"clip"
     assert commands[0][0] == "yt-dlp"
+    assert commands[0][2] == YTDLP_EXTRACTOR_ARGS
+    assert commands[0][4] == YTDLP_FORMATS[0]
     assert commands[1][0] == "ffmpeg"
     assert str(candidate.start_seconds) in commands[1]
+
+
+def test_generate_clip_file_falls_back_to_alternate_ytdlp_format(db_session, valid_candidate_data, tmp_path, monkeypatch):
+    candidate = create_candidate(db_session, valid_candidate_data)
+    source_dir = tmp_path / "source"
+    clip_dir = tmp_path / "clips"
+    commands = []
+
+    monkeypatch.setattr("app.services.clip_download.SOURCE_VIDEO_DIR", source_dir)
+    monkeypatch.setattr("app.services.clip_download.DERIVED_CLIP_DIR", clip_dir)
+
+    def fake_ytdlp(db, candidate_arg, command):
+        commands.append(command)
+        if command[4] == YTDLP_FORMATS[0]:
+            raise ClipDownloadError("primary format failed")
+        source_dir.mkdir(parents=True, exist_ok=True)
+        (source_dir / f"{candidate.stream.source_video_id}.mp4").write_bytes(b"source")
+
+    def fake_ffmpeg(db, candidate_arg, command, duration):
+        Path(command[-1]).write_bytes(b"clip")
+
+    monkeypatch.setattr("app.services.clip_download.run_ytdlp_command", fake_ytdlp)
+    monkeypatch.setattr("app.services.clip_download.run_ffmpeg_command", fake_ffmpeg)
+
+    output = generate_clip_file(db_session, candidate)
+
+    assert output == clip_dir / f"{candidate.candidate_window_id}.mp4"
+    assert [command[4] for command in commands] == YTDLP_FORMATS
+
+
+def test_generate_clip_file_replaces_tiny_source_cache(db_session, valid_candidate_data, tmp_path, monkeypatch):
+    candidate = create_candidate(db_session, valid_candidate_data)
+    source_dir = tmp_path / "source"
+    clip_dir = tmp_path / "clips"
+    source_dir.mkdir(parents=True)
+    cached_source = source_dir / f"{candidate.stream.source_video_id}.mp4"
+    cached_source.write_bytes(b"partial")
+
+    monkeypatch.setattr("app.services.clip_download.SOURCE_VIDEO_DIR", source_dir)
+    monkeypatch.setattr("app.services.clip_download.DERIVED_CLIP_DIR", clip_dir)
+
+    def fake_ytdlp(db, candidate_arg, command):
+        cached_source.write_bytes(b"x" * 1_000_000)
+
+    def fake_ffmpeg(db, candidate_arg, command, duration):
+        Path(command[-1]).write_bytes(b"clip")
+
+    monkeypatch.setattr("app.services.clip_download.run_ytdlp_command", fake_ytdlp)
+    monkeypatch.setattr("app.services.clip_download.run_ffmpeg_command", fake_ffmpeg)
+
+    output = generate_clip_file(db_session, candidate)
+
+    assert output == clip_dir / f"{candidate.candidate_window_id}.mp4"
+    assert cached_source.stat().st_size == 1_000_000
 
 
 def test_clips_page_renders_generate_download_button(client, db_session, valid_candidate_data):
