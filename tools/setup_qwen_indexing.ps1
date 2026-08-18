@@ -14,6 +14,7 @@ $ModelDir = Join-Path (Join-Path $RuntimeRoot "models") ([string]$RuntimeConfig.
 $AppPython = Join-Path $ProjectDir ".venv\Scripts\python.exe"
 $IndexPython = Join-Path $VenvDir "Scripts\python.exe"
 $FreezePath = Join-Path $RuntimeRoot "environment.freeze.txt"
+$ModelRevisionMarker = Join-Path $ModelDir ".shocks-art-model-revision"
 
 $TorchVersion = [string]$RuntimeConfig.torch.version
 $TorchvisionVersion = [string]$RuntimeConfig.torch.torchvisionVersion
@@ -127,15 +128,14 @@ if ($LASTEXITCODE -ne 0) {
 & $IndexPython -m pip install huggingface-hub
 if ($LASTEXITCODE -ne 0) { throw "Could not install huggingface-hub in the indexing environment." }
 
-if (-not (Test-Path -LiteralPath (Join-Path $ModelDir "config.json"))) {
-    Write-Step "Downloading pinned $ModelId model snapshot"
-    New-Item -ItemType Directory -Force -Path $ModelDir | Out-Null
-    $env:SHOCKS_QWEN_MODEL_DIR = $ModelDir
-    $env:SHOCKS_QWEN_MODEL_ID = $ModelId
-    $env:SHOCKS_QWEN_MODEL_REVISION = $ModelRevision
-    & $IndexPython -c "import os; from huggingface_hub import snapshot_download; snapshot_download(repo_id=os.environ['SHOCKS_QWEN_MODEL_ID'], revision=os.environ['SHOCKS_QWEN_MODEL_REVISION'], local_dir=os.environ['SHOCKS_QWEN_MODEL_DIR'])"
-    if ($LASTEXITCODE -ne 0) { throw "Could not download pinned Qwen3-VL-Embedding-2B model revision $ModelRevision." }
-}
+Write-Step "Synchronizing pinned $ModelId model snapshot $ModelRevision"
+New-Item -ItemType Directory -Force -Path $ModelDir | Out-Null
+$env:SHOCKS_QWEN_MODEL_DIR = $ModelDir
+$env:SHOCKS_QWEN_MODEL_ID = $ModelId
+$env:SHOCKS_QWEN_MODEL_REVISION = $ModelRevision
+& $IndexPython -c "import os; from huggingface_hub import snapshot_download; snapshot_download(repo_id=os.environ['SHOCKS_QWEN_MODEL_ID'], revision=os.environ['SHOCKS_QWEN_MODEL_REVISION'], local_dir=os.environ['SHOCKS_QWEN_MODEL_DIR'])"
+if ($LASTEXITCODE -ne 0) { throw "Could not synchronize pinned Qwen3-VL-Embedding-2B model revision $ModelRevision." }
+Set-Content -LiteralPath $ModelRevisionMarker -Value $ModelRevision -Encoding ASCII
 
 Write-Step "Recording resolved isolated package environment"
 & $IndexPython -m pip freeze | Set-Content -LiteralPath $FreezePath -Encoding UTF8
