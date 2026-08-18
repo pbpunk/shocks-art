@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 
 {% block content %}
-<link rel="stylesheet" href="{{ url_path(request, '/static/library.css?v=library-catalog-1') }}">
+<link rel="stylesheet" href="{{ url_path(request, '/static/library.css?v=semantic-search-1') }}">
 <section class="panel">
   <div class="section-heading">
     <div>
       <p class="eyebrow">Library</p>
-      <h1>Media catalog</h1>
-      <p class="muted">The source layer for searchable footage. Semantic indexing comes next.</p>
+      <h1>Media memory</h1>
+      <p class="muted">Search indexed visual evidence by meaning, or filter the source catalog by filename/title.</p>
     </div>
     <form method="post" action="{{ url_path(request, '/actions/library/ingest') }}">
       <button type="submit">Scan inbox</button>
@@ -42,6 +42,27 @@
       <span class="muted">Supported files currently on disk</span>
     </article>
   </div>
+
+  <section class="semantic-search-panel" aria-labelledby="semantic-search-heading">
+    <div class="section-heading compact-heading">
+      <div>
+        <p class="eyebrow">Visual semantic search</p>
+        <h2 id="semantic-search-heading">Find what is in the footage</h2>
+        <p class="muted">The query is embedded with the isolated Qwen runtime and compared only with persisted visual vectors. Filenames and titles are display metadata, not scoring inputs.</p>
+      </div>
+    </div>
+
+    <form id="semantic-search-form" class="semantic-search-form">
+      <label class="grow" for="semantic-query">
+        <span>Describe what you want to find</span>
+        <input id="semantic-query" type="search" autocomplete="off" placeholder="man playing guitar" maxlength="500" required>
+      </label>
+      <button id="semantic-search-button" type="submit">Search visuals</button>
+    </form>
+
+    <div id="semantic-search-status" class="semantic-search-status muted" aria-live="polite">Search is read-only. The first prototype query can take about 15 seconds while the isolated model starts.</div>
+    <div id="semantic-search-results" class="semantic-results" hidden></div>
+  </section>
 
   <section class="panel inset-panel">
     <div class="section-heading">
@@ -108,6 +129,124 @@
     </div>
   {% endif %}
 
-  <p class="muted">This catalog filter is filename/title based. The upcoming semantic search will deliberately score visual/language traces independently of filenames.</p>
+  <p class="muted">Catalog filtering above is filename/title based and stays separate from semantic scoring.</p>
 </section>
+
+<script>
+(() => {
+  const form = document.getElementById('semantic-search-form');
+  const input = document.getElementById('semantic-query');
+  const button = document.getElementById('semantic-search-button');
+  const status = document.getElementById('semantic-search-status');
+  const results = document.getElementById('semantic-search-results');
+  const endpoint = {{ url_path(request, '/api/library/search/visual')|tojson }};
+
+  const milliseconds = (value) => `${Math.round(Number(value) || 0)} ms`;
+
+  function renderMatch(match, rank) {
+    const card = document.createElement('article');
+    card.className = 'semantic-result-card';
+
+    const link = document.createElement('a');
+    link.className = 'semantic-result-thumb';
+    link.href = match.thumbnailUrl;
+    link.target = '_blank';
+    link.rel = 'noopener';
+
+    const image = document.createElement('img');
+    image.src = match.thumbnailUrl;
+    image.alt = `Visual match ${rank}: ${match.title || match.filename || 'media'}`;
+    image.loading = 'lazy';
+    link.appendChild(image);
+
+    const body = document.createElement('div');
+    body.className = 'semantic-result-body';
+
+    const meta = document.createElement('div');
+    meta.className = 'semantic-result-meta';
+
+    const rankLabel = document.createElement('span');
+    rankLabel.className = 'semantic-rank';
+    rankLabel.textContent = `#${rank}`;
+
+    const score = document.createElement('strong');
+    score.textContent = `score ${Number(match.score).toFixed(4)}`;
+    meta.append(rankLabel, score);
+
+    const title = document.createElement('h3');
+    title.textContent = match.title || match.filename || match.mediaId;
+
+    const subtitle = document.createElement('p');
+    subtitle.className = 'muted semantic-result-subtitle';
+    subtitle.textContent = `${match.timestampLabel} · ${match.filename || match.kind || ''}`;
+
+    const details = document.createElement('details');
+    details.className = 'semantic-provenance';
+    const summary = document.createElement('summary');
+    summary.textContent = 'Evidence / provenance';
+    const provenance = document.createElement('div');
+    provenance.className = 'semantic-provenance-grid';
+    const fields = [
+      ['Trace', match.traceId],
+      ['Media', match.mediaId],
+      ['Extractor', `${match.provenance?.traceExtractor || 'unknown'} ${match.provenance?.traceExtractorVersion || ''}`.trim()],
+      ['Trace config', match.provenance?.traceConfigurationHash || 'unknown'],
+      ['Embedding', match.provenance?.embeddingGeneration || 'unknown'],
+      ['Dimension', String(match.provenance?.embeddingDimension || '')],
+    ];
+    for (const [label, value] of fields) {
+      const key = document.createElement('span');
+      key.className = 'muted';
+      key.textContent = label;
+      const val = document.createElement('code');
+      val.textContent = value;
+      provenance.append(key, val);
+    }
+    details.append(summary, provenance);
+    body.append(meta, title, subtitle, details);
+    card.append(link, body);
+    return card;
+  }
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const query = input.value.trim();
+    if (!query) return;
+
+    button.disabled = true;
+    results.hidden = true;
+    results.replaceChildren();
+    status.textContent = 'Starting isolated Qwen runtime and searching visual evidence…';
+
+    try {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({query, top_k: 10}),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.detail || `Search failed with HTTP ${response.status}`);
+      }
+
+      const search = payload.result || {};
+      status.textContent = `${search.returned || 0} matches from ${search.vectorCount || 0} vectors · query embedding ${milliseconds(payload.queryEmbeddingMs)} · SQLite + scoring ${milliseconds(search.elapsedMs)}`;
+      results.hidden = false;
+
+      if (!search.matches?.length) {
+        const empty = document.createElement('p');
+        empty.className = 'muted';
+        empty.textContent = 'No visual embeddings matched this generation.';
+        results.appendChild(empty);
+        return;
+      }
+      search.matches.forEach((match, index) => results.appendChild(renderMatch(match, index + 1)));
+    } catch (error) {
+      status.textContent = `Semantic search failed: ${error.message}`;
+    } finally {
+      button.disabled = false;
+    }
+  });
+})();
+</script>
 {% endblock %}
