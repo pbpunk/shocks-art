@@ -1,0 +1,90 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from app.indexing.embeddings import EmbeddingBackendError
+from app.indexing.qwen_runtime import (
+    inspect_qwen_runtime,
+    load_qwen_runtime_config,
+    require_qwen_runtime,
+)
+
+
+def write_config(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "runtimeRoot": "data/qwen_indexing",
+                "qwenSource": {
+                    "repository": "https://example.invalid/Qwen3-VL-Embedding.git",
+                    "commit": "a" * 40,
+                },
+                "model": {
+                    "id": "Qwen/Qwen3-VL-Embedding-2B",
+                    "revision": "b" * 40,
+                    "directoryName": "Qwen3-VL-Embedding-2B",
+                    "dtype": "bfloat16",
+                    "nativeDimension": 2048,
+                },
+                "inference": {
+                    "recommendedImageBatchSize": 12,
+                    "largestValidatedImageBatchSize": 16,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_runtime_config_loads_pinned_identity(tmp_path):
+    config_path = tmp_path / "runtime.json"
+    write_config(config_path)
+
+    config = load_qwen_runtime_config(config_path)
+
+    assert config.model_id == "Qwen/Qwen3-VL-Embedding-2B"
+    assert config.model_revision == "b" * 40
+    assert config.qwen_commit == "a" * 40
+    assert config.native_dimension == 2048
+    assert config.recommended_image_batch_size == 12
+    assert config.largest_validated_image_batch_size == 16
+
+
+def test_missing_runtime_is_reported_without_importing_ml_stack(tmp_path):
+    config_path = tmp_path / "runtime.json"
+    write_config(config_path)
+
+    status = inspect_qwen_runtime(project_root=tmp_path, config_path=config_path)
+
+    assert status.available is False
+    assert len(status.problems) == 3
+    assert all(str(tmp_path) not in problem for problem in status.problems)
+
+    with pytest.raises(EmbeddingBackendError, match="tools/setup_qwen_indexing.ps1"):
+        require_qwen_runtime(project_root=tmp_path, config_path=config_path)
+
+
+def test_complete_runtime_is_available_and_paths_are_project_relative(tmp_path):
+    config_path = tmp_path / "runtime.json"
+    write_config(config_path)
+    runtime = tmp_path / "data" / "qwen_indexing"
+
+    python = runtime / ".venv" / "Scripts" / "python.exe"
+    qwen_source = runtime / "Qwen3-VL-Embedding" / "src" / "models" / "qwen3_vl_embedding.py"
+    model_config = runtime / "models" / "Qwen3-VL-Embedding-2B" / "config.json"
+    for path in (python, qwen_source, model_config):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("test", encoding="utf-8")
+
+    status = require_qwen_runtime(project_root=tmp_path, config_path=config_path)
+    payload = status.as_dict(project_root=tmp_path)
+
+    assert status.available is True
+    assert status.problems == ()
+    assert payload["available"] is True
+    assert payload["modelId"] == "Qwen/Qwen3-VL-Embedding-2B"
+    assert payload["paths"]["python"] == "data/qwen_indexing/.venv/Scripts/python.exe"
+    assert payload["paths"]["qwenRepo"] == "data/qwen_indexing/Qwen3-VL-Embedding"
+    assert payload["paths"]["modelDir"] == "data/qwen_indexing/models/Qwen3-VL-Embedding-2B"
