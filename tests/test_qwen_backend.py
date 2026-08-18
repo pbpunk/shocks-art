@@ -11,12 +11,14 @@ from app.indexing.qwen_runtime import QwenRuntimeConfig, QwenRuntimePaths, QwenR
 
 def runtime_status(tmp_path: Path) -> QwenRuntimeStatus:
     runtime_root = tmp_path / "data" / "qwen_indexing"
+    model_dir = runtime_root / "models" / "Qwen3-VL-Embedding-2B"
     paths = QwenRuntimePaths(
         runtime_root=runtime_root,
         python=runtime_root / ".venv" / "Scripts" / "python.exe",
         qwen_repo=runtime_root / "Qwen3-VL-Embedding",
-        model_dir=runtime_root / "models" / "Qwen3-VL-Embedding-2B",
+        model_dir=model_dir,
         package_freeze=runtime_root / "environment.freeze.txt",
+        model_revision_marker=model_dir / ".shocks-art-model-revision",
     )
     config = QwenRuntimeConfig(
         runtime_root="data/qwen_indexing",
