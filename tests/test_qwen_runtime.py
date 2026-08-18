@@ -78,7 +78,7 @@ def test_missing_runtime_is_reported_without_importing_ml_stack(tmp_path):
     status = inspect_qwen_runtime(project_root=tmp_path, config_path=config_path)
 
     assert status.available is False
-    assert len(status.problems) == 3
+    assert len(status.problems) == 5
     assert all(str(tmp_path) not in problem for problem in status.problems)
 
     with pytest.raises(EmbeddingBackendError, match="tools/setup_qwen_indexing.ps1"):
@@ -92,10 +92,19 @@ def test_complete_runtime_is_available_and_paths_are_project_relative(tmp_path):
 
     python = runtime / ".venv" / "Scripts" / "python.exe"
     qwen_source = runtime / "Qwen3-VL-Embedding" / "src" / "models" / "qwen3_vl_embedding.py"
+    qwen_head = runtime / "Qwen3-VL-Embedding" / ".git" / "HEAD"
     model_config = runtime / "models" / "Qwen3-VL-Embedding-2B" / "config.json"
-    for path in (python, qwen_source, model_config):
+    model_revision = runtime / "models" / "Qwen3-VL-Embedding-2B" / ".shocks-art-model-revision"
+
+    for path, content in (
+        (python, "test"),
+        (qwen_source, "test"),
+        (qwen_head, "a" * 40),
+        (model_config, "test"),
+        (model_revision, "b" * 40),
+    ):
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text("test", encoding="utf-8")
+        path.write_text(content, encoding="utf-8")
 
     status = require_qwen_runtime(project_root=tmp_path, config_path=config_path)
     payload = status.as_dict(project_root=tmp_path)
@@ -109,3 +118,26 @@ def test_complete_runtime_is_available_and_paths_are_project_relative(tmp_path):
     assert payload["paths"]["python"] == "data/qwen_indexing/.venv/Scripts/python.exe"
     assert payload["paths"]["qwenRepo"] == "data/qwen_indexing/Qwen3-VL-Embedding"
     assert payload["paths"]["modelDir"] == "data/qwen_indexing/models/Qwen3-VL-Embedding-2B"
+    assert payload["paths"]["modelRevisionMarker"].endswith("/.shocks-art-model-revision")
+
+
+def test_revision_mismatch_blocks_runtime(tmp_path):
+    config_path = tmp_path / "runtime.json"
+    write_config(config_path)
+    runtime = tmp_path / "data" / "qwen_indexing"
+    required_files = {
+        runtime / ".venv" / "Scripts" / "python.exe": "test",
+        runtime / "Qwen3-VL-Embedding" / "src" / "models" / "qwen3_vl_embedding.py": "test",
+        runtime / "Qwen3-VL-Embedding" / ".git" / "HEAD": "c" * 40,
+        runtime / "models" / "Qwen3-VL-Embedding-2B" / "config.json": "test",
+        runtime / "models" / "Qwen3-VL-Embedding-2B" / ".shocks-art-model-revision": "d" * 40,
+    }
+    for path, content in required_files.items():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    status = inspect_qwen_runtime(project_root=tmp_path, config_path=config_path)
+
+    assert status.available is False
+    assert any("source revision mismatch" in problem for problem in status.problems)
+    assert any("model revision mismatch" in problem for problem in status.problems)
