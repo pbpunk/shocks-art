@@ -13,6 +13,7 @@ from app.indexing.embedding_service import index_visual_trace_embeddings
 from app.indexing.evaluation import evaluate_visual_search, load_evaluation_spec
 from app.indexing.qwen_backend import QwenSubprocessEmbeddingBackend
 from app.indexing.qwen_runtime import inspect_qwen_runtime
+from app.indexing.refinement import RefinementConfig, refine_visual_trace
 from app.indexing.service import VisualExtractionConfig, index_all_visual_media, index_visual_media
 from app.indexing.visual_search import search_visual_embeddings
 from app.library_models import Embedding, IndexRun, Media, Trace  # noqa: F401 - registers indexing tables
@@ -61,6 +62,22 @@ def _parser() -> argparse.ArgumentParser:
     )
     search_parser.add_argument("query")
     search_parser.add_argument("--top-k", type=int, default=10)
+
+    refinement_parser = subparsers.add_parser(
+        "refine-visual",
+        help="Densely rescan a bounded local window around one coarse video Trace",
+    )
+    refinement_parser.add_argument("trace_id", help="Coarse visual Trace ID to refine")
+    refinement_parser.add_argument("query", help="Semantic text query used to rerank dense local frames")
+    refinement_parser.add_argument("--radius", type=float, default=None, help="Optional explicit radius in seconds")
+    refinement_parser.add_argument("--step", type=float, default=None, help="Optional explicit dense step in seconds")
+    refinement_parser.add_argument("--max-samples", type=int, default=31)
+    refinement_parser.add_argument("--top-k", type=int, default=10)
+    refinement_parser.add_argument(
+        "--output-dir",
+        default=None,
+        help="Optional ignored directory that preserves the returned top review frames",
+    )
 
     evaluation_parser = subparsers.add_parser(
         "evaluate-visual",
@@ -158,6 +175,29 @@ def main(argv: list[str] | None = None) -> int:
                     sort_keys=True,
                 )
             )
+            return 0
+
+        if args.command == "refine-visual":
+            try:
+                backend = QwenSubprocessEmbeddingBackend()
+                config = RefinementConfig(
+                    radius_seconds=args.radius,
+                    step_seconds=args.step,
+                    max_samples=args.max_samples,
+                    top_k=args.top_k,
+                )
+                result = refine_visual_trace(
+                    db,
+                    trace_id=args.trace_id,
+                    query=args.query,
+                    embedding_backend=backend,
+                    config=config,
+                    output_directory=Path(args.output_dir) if args.output_dir else None,
+                )
+            except Exception as exc:
+                print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2))
+                return 1
+            print(json.dumps({"ok": True, "refinement": result.as_dict()}, indent=2, sort_keys=True))
             return 0
 
         if args.command == "evaluate-visual":
