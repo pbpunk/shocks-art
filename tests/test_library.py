@@ -183,3 +183,30 @@ def test_sampling_plan_api_is_non_mutating_prefix_safe_and_bounded(client, db_se
     assert references["8 hours"]["intervalSeconds"] == 120.0
     assert references["8 hours"]["sampleCount"] == 240
     assert "C:/private/library" not in prefixed.text
+
+
+def test_environment_audit_api_is_read_only_and_prefix_safe(client, monkeypatch):
+    payload = {
+        "schemaVersion": 1,
+        "generatedAt": "2026-08-18T00:00:00+00:00",
+        "mutatesState": False,
+        "python": {"version": "3.11.9", "implementation": "CPython"},
+        "os": {"system": "Windows", "release": "10", "machine": "AMD64"},
+        "nvidia": {
+            "available": True,
+            "gpus": [{"name": "Test GPU", "driverVersion": "999.0", "memoryTotalMiB": 12288}],
+            "reportedCudaVersion": "12.8",
+        },
+        "nvcc": {"available": False, "release": None},
+        "packages": {"torch": None},
+        "torch": {"installed": False, "probeSucceeded": False},
+    }
+    monkeypatch.setattr("app.library_routes.collect_indexing_environment", lambda: payload)
+
+    local = client.get("/api/library/indexing/environment")
+    prefixed = client.get("/shocks_art/api/library/indexing/environment")
+
+    assert local.status_code == 200
+    assert prefixed.status_code == 200
+    assert prefixed.json() == payload
+    assert prefixed.json()["mutatesState"] is False
