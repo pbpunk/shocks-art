@@ -20,6 +20,8 @@ Validation date: 2026-08-18
 
 The setup script records the resolved Python package set to `data/qwen_indexing/environment.freeze.txt`. That file is host evidence and is intentionally kept under ignored runtime data rather than committed as application dependencies.
 
+IDX-017 validation reran the pinned setup successfully, confirmed the Qwen source HEAD exactly matched the pinned commit, confirmed the isolated Torch/CUDA runtime, produced `environment.freeze.txt`, left the app/system environments untouched, and reported 75 passing application tests before and after setup.
+
 ## Benchmark result
 
 IDX-016 was validated against the existing 36 visual artifacts. Baseline and final application tests both reported 72 passing tests.
@@ -61,4 +63,24 @@ Until IDX-021 measures retrieval quality with filename leakage disabled, 2048 re
 
 `app.indexing.qwen_runtime` reads the pinned runtime contract without importing Torch, Transformers, or Qwen. It reports whether the isolated interpreter, pinned Qwen source, and model snapshot are present. `require_qwen_runtime()` raises an actionable `EmbeddingBackendError` that points to `tools/setup_qwen_indexing.ps1` instead of leaking an opaque import/file error.
 
-Heavyweight imports remain behind the lazy embedding boundary. Actual production embedding persistence begins in IDX-018.
+The configuration also derives a deterministic embedding generation ID from the pinned model revision, Qwen source commit, dtype, native dimension, and retrieval instruction. Throughput-only settings such as batch size are excluded from that identity. If a semantic-producing setting changes, a new generation ID is produced rather than silently reusing an older vector generation.
+
+## Visual embedding persistence
+
+IDX-018 keeps the heavyweight model isolated:
+
+1. The normal offline indexer selects persisted visual Traces and owns SQLite writes.
+2. `QwenSubprocessEmbeddingBackend` invokes `tools/qwen_embedding_worker.py` using `data/qwen_indexing/.venv/Scripts/python.exe`.
+3. The worker loads Qwen in the isolated process, internally batches images using the validated batch policy, and returns vectors through a temporary response file.
+4. The normal indexer L2-normalizes vectors again defensively and stores float32 bytes in `Embedding` rows.
+5. Existing rows for the exact generation ID + dimension are reused. Different generations coexist instead of replacing one another.
+
+Commands:
+
+```powershell
+python -m app.indexing qwen-status
+python -m app.indexing embed-visual
+python -m app.indexing status
+```
+
+`embed-visual` is intentionally an offline command, not a public GET/POST inference endpoint. This avoids exposing an unauthenticated expensive GPU operation and keeps Torch/Qwen out of FastAPI.
