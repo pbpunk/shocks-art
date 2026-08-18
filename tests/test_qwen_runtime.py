@@ -11,7 +11,7 @@ from app.indexing.qwen_runtime import (
 )
 
 
-def write_config(path: Path) -> None:
+def write_config(path: Path, *, instruction: str = "Retrieve relevant media.") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(
@@ -29,6 +29,7 @@ def write_config(path: Path) -> None:
                     "nativeDimension": 2048,
                 },
                 "inference": {
+                    "instruction": instruction,
                     "recommendedImageBatchSize": 12,
                     "largestValidatedImageBatchSize": 16,
                 },
@@ -48,8 +49,26 @@ def test_runtime_config_loads_pinned_identity(tmp_path):
     assert config.model_revision == "b" * 40
     assert config.qwen_commit == "a" * 40
     assert config.native_dimension == 2048
+    assert config.instruction == "Retrieve relevant media."
     assert config.recommended_image_batch_size == 12
     assert config.largest_validated_image_batch_size == 16
+    assert config.embedding_generation_id.startswith(
+        "Qwen/Qwen3-VL-Embedding-2B@bbbbbbbbbbbb#cfg-"
+    )
+    assert len(config.embedding_configuration_hash) == 64
+
+
+def test_embedding_generation_changes_when_semantic_instruction_changes(tmp_path):
+    first_path = tmp_path / "first.json"
+    second_path = tmp_path / "second.json"
+    write_config(first_path, instruction="Retrieve relevant media.")
+    write_config(second_path, instruction="Represent the visual subject.")
+
+    first = load_qwen_runtime_config(first_path)
+    second = load_qwen_runtime_config(second_path)
+
+    assert first.embedding_configuration_hash != second.embedding_configuration_hash
+    assert first.embedding_generation_id != second.embedding_generation_id
 
 
 def test_missing_runtime_is_reported_without_importing_ml_stack(tmp_path):
@@ -85,6 +104,8 @@ def test_complete_runtime_is_available_and_paths_are_project_relative(tmp_path):
     assert status.problems == ()
     assert payload["available"] is True
     assert payload["modelId"] == "Qwen/Qwen3-VL-Embedding-2B"
+    assert payload["embeddingGenerationId"] == status.config.embedding_generation_id
+    assert payload["embeddingConfigurationHash"] == status.config.embedding_configuration_hash
     assert payload["paths"]["python"] == "data/qwen_indexing/.venv/Scripts/python.exe"
     assert payload["paths"]["qwenRepo"] == "data/qwen_indexing/Qwen3-VL-Embedding"
     assert payload["paths"]["modelDir"] == "data/qwen_indexing/models/Qwen3-VL-Embedding-2B"
