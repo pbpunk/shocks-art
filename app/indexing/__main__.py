@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.core.database import Base, SessionLocal, engine
 from app.indexing.embedding_service import index_visual_trace_embeddings
 from app.indexing.evaluation import evaluate_visual_search, load_evaluation_spec
+from app.indexing.language_traces import import_existing_stream_transcript
 from app.indexing.qwen_backend import QwenSubprocessEmbeddingBackend
 from app.indexing.qwen_runtime import inspect_qwen_runtime
 from app.indexing.refinement import RefinementConfig, refine_visual_trace
@@ -79,6 +80,13 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional ignored directory that preserves the returned top review frames",
     )
 
+    language_parser = subparsers.add_parser(
+        "import-language",
+        help="Convert an existing StreamTranscript raw JSON3 caption artifact into Language Traces",
+    )
+    language_parser.add_argument("media_id", help="Media record the transcript evidence belongs to")
+    language_parser.add_argument("stream_id", help="Existing Stream whose StreamTranscript should be reused")
+
     evaluation_parser = subparsers.add_parser(
         "evaluate-visual",
         help="Run the blind multi-query/multi-dimension semantic visual evaluation bundle",
@@ -124,6 +132,10 @@ def main(argv: list[str] | None = None) -> int:
                 "traces": db.scalar(select(func.count()).select_from(Trace)) or 0,
                 "visualTraces": db.scalar(
                     select(func.count()).select_from(Trace).where(Trace.trace_type == "visual")
+                )
+                or 0,
+                "languageTraces": db.scalar(
+                    select(func.count()).select_from(Trace).where(Trace.trace_type == "language")
                 )
                 or 0,
                 "embeddings": db.scalar(select(func.count()).select_from(Embedding)) or 0,
@@ -198,6 +210,19 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2))
                 return 1
             print(json.dumps({"ok": True, "refinement": result.as_dict()}, indent=2, sort_keys=True))
+            return 0
+
+        if args.command == "import-language":
+            try:
+                result = import_existing_stream_transcript(
+                    db,
+                    media_id=args.media_id,
+                    stream_id=args.stream_id,
+                )
+            except Exception as exc:
+                print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2))
+                return 1
+            print(json.dumps({"ok": True, "result": result.as_dict()}, indent=2, sort_keys=True))
             return 0
 
         if args.command == "evaluate-visual":
