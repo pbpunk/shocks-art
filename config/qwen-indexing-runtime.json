@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "runtimeRoot": "data/qwen_indexing",
+  "python": {
+    "minimum": "3.11",
+    "validated": "3.13.5"
+  },
+  "torch": {
+    "version": "2.8.0",
+    "torchvisionVersion": "0.23.0",
+    "cudaWheel": "cu128",
+    "indexUrl": "https://download.pytorch.org/whl/cu128"
+  },
+  "qwenSource": {
+    "repository": "https://github.com/QwenLM/Qwen3-VL-Embedding.git",
+    "commit": "393e2978d27852b0d0230d6994f37f9c15bed73c"
+  },
+  "model": {
+    "id": "Qwen/Qwen3-VL-Embedding-2B",
+    "revision": "9f2f7e710d6d81056aa5c0a4f04764fec6bb7bda",
+    "directoryName": "Qwen3-VL-Embedding-2B",
+    "dtype": "bfloat16",
+    "nativeDimension": 2048,
+    "candidateDimensions": [2048, 1024, 512, 256]
+  },
+  "inference": {
+    "instruction": "Retrieve images or text relevant to the user's query.",
+    "recommendedImageBatchSize": 12,
+    "largestValidatedImageBatchSize": 16
+  },
+  "validation": {
+    "host": "NVIDIA GeForce RTX 3060 12 GB",
+    "date": "2026-08-18",
+    "note": "Embedding-dimension retrieval quality is intentionally deferred to IDX-021; native 2048 remains the safe default until that evaluation."
+  }
+}
