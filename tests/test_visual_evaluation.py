@@ -23,7 +23,9 @@ class FakeEvaluationBackend:
         self.text_calls.append(values)
         mapping = {
             "guitar": [1.0, 0.9, 0.0, 0.0],
-            "sports car": [0.0, 0.0, 1.0, 1.0],
+            # Keep the control mostly oriented toward dimensions 3-4 while
+            # ensuring every tested Matryoshka prefix has a valid nonzero norm.
+            "sports car": [0.1, -0.1, 1.0, 1.0],
         }
         return [mapping[value] for value in values]
 
