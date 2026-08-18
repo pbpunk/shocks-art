@@ -8,8 +8,11 @@ from sqlalchemy import func, select
 
 from app.core.config import get_settings
 from app.core.database import Base, SessionLocal, engine
-from app.library_models import IndexRun, Media, Trace  # noqa: F401 - registers indexing tables
+from app.indexing.embedding_service import index_visual_trace_embeddings
+from app.indexing.qwen_backend import QwenSubprocessEmbeddingBackend
+from app.indexing.qwen_runtime import inspect_qwen_runtime
 from app.indexing.service import VisualExtractionConfig, index_all_visual_media, index_visual_media
+from app.library_models import Embedding, IndexRun, Media, Trace  # noqa: F401 - registers indexing tables
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -39,6 +42,14 @@ def _parser() -> argparse.ArgumentParser:
     )
     pending_parser.add_argument("--index-root", default=None)
 
+    embed_parser = subparsers.add_parser(
+        "embed-visual",
+        help="Generate/reuse normalized Qwen embeddings for visual Trace artifacts",
+    )
+    embed_parser.add_argument("--limit", type=int, default=None)
+    embed_parser.add_argument("--index-root", default=None)
+
+    subparsers.add_parser("qwen-status", help="Report the pinned isolated Qwen runtime without loading it")
     subparsers.add_parser("status", help="Print machine-readable indexing table counts")
     return parser
 
@@ -52,6 +63,15 @@ def main(argv: list[str] | None = None) -> int:
     # Only create missing indexing tables; do not bootstrap/import the FastAPI app.
     Base.metadata.create_all(bind=engine)
 
+    if args.command == "qwen-status":
+        try:
+            status = inspect_qwen_runtime()
+            print(json.dumps(status.as_dict(), indent=2, sort_keys=True))
+            return 0 if status.available else 1
+        except Exception as exc:
+            print(json.dumps({"available": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2))
+            return 1
+
     with SessionLocal() as db:
         if args.command == "status":
             payload = {
@@ -61,9 +81,25 @@ def main(argv: list[str] | None = None) -> int:
                     select(func.count()).select_from(Trace).where(Trace.trace_type == "visual")
                 )
                 or 0,
+                "embeddings": db.scalar(select(func.count()).select_from(Embedding)) or 0,
                 "indexRuns": db.scalar(select(func.count()).select_from(IndexRun)) or 0,
             }
             print(json.dumps(payload, indent=2, sort_keys=True))
+            return 0
+
+        if args.command == "embed-visual":
+            try:
+                backend = QwenSubprocessEmbeddingBackend()
+                result = index_visual_trace_embeddings(
+                    db,
+                    index_root=_root_from_args(args.index_root),
+                    backend=backend,
+                    limit=args.limit,
+                )
+            except Exception as exc:
+                print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2))
+                return 1
+            print(json.dumps({"ok": True, "result": result.as_dict()}, indent=2, sort_keys=True))
             return 0
 
         config = VisualExtractionConfig(sample_interval_seconds=args.interval)
