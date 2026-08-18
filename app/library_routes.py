@@ -13,7 +13,7 @@ from starlette.requests import Request
 from app.core.config import get_settings
 from app.core.database import get_db
 from app.library_models import Media
-from app.services.library import ingest_local_media, scan_media_files
+from app.services.library import IngestResult, ingest_local_media, scan_media_files
 
 
 router = APIRouter()
@@ -41,6 +41,46 @@ def app_version() -> str:
     return os.getenv("JARVIS_COMMIT_SHA", "unknown")
 
 
+def media_inventory_item(media: Media) -> dict:
+    metadata = media.metadata_json if isinstance(media.metadata_json, dict) else {}
+    return {
+        "mediaId": media.media_id,
+        "sourceType": media.source_type,
+        "sourceUrl": media.source_url or None,
+        "title": media.title,
+        "filename": media.filename,
+        "relativePath": metadata.get("relative_path"),
+        "mimeType": media.mime_type,
+        "kind": media.media_kind,
+        "durationSeconds": media.duration_seconds,
+        "dimensions": {
+            "width": media.width or 0,
+            "height": media.height or 0,
+        },
+        "sizeBytes": media.size_bytes,
+        "processingStatus": media.processing_status,
+        "sha256Short": media.checksum_sha256[:12] if media.checksum_sha256 else None,
+        "createdAt": media.created_at.isoformat() if media.created_at else None,
+        "updatedAt": media.updated_at.isoformat() if media.updated_at else None,
+    }
+
+
+def ingest_summary_message(result: IngestResult) -> str:
+    message = (
+        f"Scan complete: {result.discovered} found, {result.created} added, "
+        f"{result.updated} updated, {result.skipped} unchanged, {result.errors} errors."
+    )
+    if result.failures:
+        failure_summaries = [
+            f"{failure.path}: {failure.error_type}: {failure.message[:180]}"
+            for failure in result.failures[:3]
+        ]
+        message += " Failures: " + " | ".join(failure_summaries)
+        if len(result.failures) > 3:
+            message += f" | +{len(result.failures) - 3} more (see /api/library/ingest)."
+    return message
+
+
 @router.get("/health")
 def app_health():
     """Canonical JARVIS readiness and identity endpoint."""
@@ -61,6 +101,65 @@ def app_health():
 def app_ping():
     """Cheap API-route verification endpoint for JARVIS startup checks."""
     return {"ok": True, "app": APP_ID, "route": APP_ROUTE, "version": app_version()}
+
+
+@router.get("/api/library/media")
+def library_media_inventory(
+    q: str = Query(default=""),
+    kind: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    limit: int = Query(default=1000, ge=1, le=5000),
+    db: Session = Depends(get_db),
+):
+    """Machine-readable Media inventory without absolute workstation paths."""
+    media_query = select(Media).order_by(Media.created_at.desc())
+    normalized_q = q.strip().lower()
+    if normalized_q:
+        pattern = f"%{normalized_q}%"
+        media_query = media_query.where(
+            or_(
+                func.lower(Media.title).like(pattern),
+                func.lower(Media.filename).like(pattern),
+            )
+        )
+    if kind:
+        media_query = media_query.where(Media.media_kind == kind.strip().lower())
+    if status:
+        media_query = media_query.where(Media.processing_status == status.strip().lower())
+
+    items = list(db.scalars(media_query.limit(limit)).all())
+    total_count = db.scalar(select(func.count()).select_from(Media)) or 0
+    video_count = db.scalar(select(func.count()).select_from(Media).where(Media.media_kind == "video")) or 0
+    image_count = db.scalar(select(func.count()).select_from(Media).where(Media.media_kind == "image")) or 0
+
+    return {
+        "schemaVersion": 1,
+        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "summary": {
+            "total": total_count,
+            "video": video_count,
+            "image": image_count,
+            "returned": len(items),
+        },
+        "filters": {
+            "q": q,
+            "kind": kind,
+            "status": status,
+            "limit": limit,
+        },
+        "items": [media_inventory_item(media) for media in items],
+    }
+
+
+@router.post("/api/library/ingest")
+def library_ingest_api(db: Session = Depends(get_db)):
+    """Run local Library ingestion and return complete per-file diagnostics."""
+    ingest_path = Path(get_settings().library_ingest_path)
+    result = ingest_local_media(db, ingest_path)
+    return {
+        "ok": result.errors == 0,
+        "result": result.as_dict(),
+    }
 
 
 @router.get("/library", response_class=HTMLResponse)
@@ -111,14 +210,11 @@ def library_ingest_action(request: Request, db: Session = Depends(get_db)):
     ingest_path = Path(get_settings().library_ingest_path)
     try:
         result = ingest_local_media(db, ingest_path)
-        message = (
-            f"Scan complete: {result.discovered} found, {result.created} added, "
-            f"{result.updated} updated, {result.skipped} unchanged, {result.errors} errors."
-        )
+        message = ingest_summary_message(result)
         status = "success" if result.errors == 0 else "warning"
     except Exception as exc:
         status = "error"
-        message = f"Library scan failed: {exc}"
+        message = f"Library scan failed: {type(exc).__name__}: {exc}"
     query = urlencode({"ingest_status": status, "ingest_message": message})
     return local_redirect(request, f"/library?{query}")
 
