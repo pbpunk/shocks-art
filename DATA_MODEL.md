@@ -10,7 +10,7 @@ Timestamped evidence extracted from a Media item. A Trace has an extensible `tra
 
 ## Embedding
 
-Regenerable vector representation of a Trace. Stores the Trace link, model ID, vector dimension, dtype, normalized flag, and raw vector bytes. A Trace/model/dimension tuple is unique so different embedding generations are never silently mixed.
+Regenerable vector representation of a Trace. Stores the Trace link, embedding-generation model ID, vector dimension, dtype, normalized flag, and raw vector bytes. For Qwen, the stored `model_id` is a deterministic generation identity derived from the pinned model revision, Qwen source commit, dtype, native dimension, and semantic instruction rather than only the human-facing base model name. A Trace/model-generation/dimension tuple is unique, so configuration/model changes create a separate vector generation instead of silently replacing or mixing prior embeddings.
 
 ## IndexRun
 
