@@ -60,6 +60,7 @@ class QwenRuntimePaths:
     qwen_repo: Path
     model_dir: Path
     package_freeze: Path
+    model_revision_marker: Path
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,7 @@ class QwenRuntimeStatus:
                 "qwenRepo": relative(self.paths.qwen_repo),
                 "modelDir": relative(self.paths.model_dir),
                 "packageFreeze": relative(self.paths.package_freeze),
+                "modelRevisionMarker": relative(self.paths.model_revision_marker),
             },
         }
 
@@ -159,13 +161,22 @@ def qwen_runtime_paths(
     root = Path(project_root or PROJECT_ROOT).resolve()
     cfg = config or load_qwen_runtime_config()
     runtime_root = root / Path(cfg.runtime_root)
+    model_dir = runtime_root / "models" / cfg.model_directory_name
     return QwenRuntimePaths(
         runtime_root=runtime_root,
         python=runtime_root / ".venv" / "Scripts" / "python.exe",
         qwen_repo=runtime_root / "Qwen3-VL-Embedding",
-        model_dir=runtime_root / "models" / cfg.model_directory_name,
+        model_dir=model_dir,
         package_freeze=runtime_root / "environment.freeze.txt",
+        model_revision_marker=model_dir / ".shocks-art-model-revision",
     )
+
+
+def _safe_read(path: Path) -> str | None:
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
 
 
 def inspect_qwen_runtime(
@@ -180,16 +191,31 @@ def inspect_qwen_runtime(
     required = (
         (paths.python, "isolated Python interpreter"),
         (paths.qwen_repo / "src" / "models" / "qwen3_vl_embedding.py", "pinned Qwen source"),
+        (paths.qwen_repo / ".git" / "HEAD", "Qwen source revision marker"),
         (paths.model_dir / "config.json", "Qwen model snapshot"),
+        (paths.model_revision_marker, "Qwen model revision marker"),
     )
-    problems = tuple(
+    problems = [
         f"Missing {label}: {path.relative_to(root).as_posix()}"
         for path, label in required
         if not path.is_file()
-    )
+    ]
+
+    source_head = _safe_read(paths.qwen_repo / ".git" / "HEAD")
+    if source_head and source_head != config.qwen_commit:
+        problems.append(
+            f"Qwen source revision mismatch: expected {config.qwen_commit}, found {source_head}"
+        )
+
+    model_revision = _safe_read(paths.model_revision_marker)
+    if model_revision and model_revision != config.model_revision:
+        problems.append(
+            f"Qwen model revision mismatch: expected {config.model_revision}, found {model_revision}"
+        )
+
     return QwenRuntimeStatus(
         available=not problems,
-        problems=problems,
+        problems=tuple(problems),
         config=config,
         paths=paths,
     )
