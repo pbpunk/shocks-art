@@ -25,6 +25,7 @@ class Settings:
     database_url: str = "sqlite:///./data/shocks_art.db"
     library_ingest_path: str = "./data/library_inbox"
     library_index_path: str = "./data/library_index"
+    library_scratch_path: str = "./data/library_scratch"
     youtube_api_key: str = ""
     youtube_channel_handle: str = "shocksart"
     youtube_oauth_client_secrets_file: str = ""
@@ -51,6 +52,7 @@ def get_settings() -> Settings:
         database_url=read("DATABASE_URL", Settings.database_url),
         library_ingest_path=read("LIBRARY_INGEST_PATH", Settings.library_ingest_path),
         library_index_path=read("LIBRARY_INDEX_PATH", Settings.library_index_path),
+        library_scratch_path=read("LIBRARY_SCRATCH_PATH", Settings.library_scratch_path),
         youtube_api_key=read("YOUTUBE_API_KEY", ""),
         youtube_channel_handle=read("YOUTUBE_CHANNEL_HANDLE", Settings.youtube_channel_handle),
         youtube_oauth_client_secrets_file=read("YOUTUBE_OAUTH_CLIENT_SECRETS_FILE", ""),
