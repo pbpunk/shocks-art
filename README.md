@@ -108,9 +108,21 @@ python -m app.indexing index-media media_xxx
 python -m app.indexing index-pending
 ```
 
-The current visual-extraction baseline creates one visual Trace for each still image and samples video every five seconds. Extraction is idempotent by Media/type/timestamp/extractor/version/configuration. A rerun reuses existing artifacts, resumes after interrupted work, and repairs a missing generated artifact without duplicating the Trace row. Sampling policy will be tuned separately as the validation corpus expands to longer footage.
+Visual extraction is restart-safe and idempotent by Media/type/timestamp/extractor/version/configuration. A rerun reuses existing artifacts, resumes after interrupted work, and repairs a missing generated artifact without duplicating the Trace row.
 
-No GPU or ML dependency is required for this stage. Multimodal embeddings and local speech transcription are later indexing layers.
+The default `adaptive-v1` sampling policy keeps short B-roll dense enough to inspect while bounding long sources:
+
+- up to 60 seconds: every 5 seconds
+- up to 10 minutes: every 10 seconds
+- up to 60 minutes: every 30 seconds
+- over 60 minutes: every 60 seconds
+- maximum 240 samples per video; very long sources automatically widen beyond 60 seconds if needed
+
+Use `--interval N` to override adaptive sampling with a fixed interval for experiments. The read-only endpoint `/shocks_art/api/library/indexing/sampling-plan` previews the current plan for real Library Media plus reference long-form durations without creating Traces or artifacts.
+
+The embedding layer is isolated behind `app.indexing.embeddings.EmbeddingBackend` and `LazyEmbeddingBackend`; importing FastAPI does not import Torch, Transformers, Qwen, or another heavyweight ML runtime. The read-only endpoint `/shocks_art/api/library/indexing/environment` reports host Python/NVIDIA/CUDA/package state. If Torch is already installed, CUDA capability is probed in a child Python process rather than loading Torch into the web server.
+
+No GPU or ML package is installed automatically by these diagnostics.
 
 ## Real Single-Stream Smoke Test
 
@@ -158,7 +170,7 @@ The first run may require signing in or dismissing YouTube UI in the opened brow
 pytest
 ```
 
-`tests/test_framework_contract.py` covers the manifest, health identity, API ping, namespaced routes, and JARVIS shell behavior. `tests/test_indexing.py` covers the Trace/Embedding/IndexRun schema plus deterministic visual extraction, idempotent reuse, interrupted-run resume, and artifact repair without requiring FFmpeg or GPU inference.
+`tests/test_framework_contract.py` covers the manifest, health identity, API ping, namespaced routes, and JARVIS shell behavior. `tests/test_indexing.py` covers the Trace/Embedding/IndexRun schema, adaptive/fixed sampling, deterministic visual extraction, idempotent reuse, interrupted-run resume, and artifact repair without requiring FFmpeg or GPU inference. `tests/test_embeddings.py` verifies that the multimodal embedding boundary stays lazy and validates model identity/vector shape.
 
 ## Main Paths
 
@@ -167,7 +179,7 @@ pytest
 - `schemas/candidate_window.schema.v1.json`: Gemini output contract.
 - `app/models.py`: asset lineage entities.
 - `app/library_models.py`: generic Media, Trace, Embedding, and IndexRun entities.
-- `app/indexing/`: standalone Library indexing service and CLI.
+- `app/indexing/`: standalone Library indexing, sampling, host diagnostics, and embedding boundaries.
 - `app/services/processing.py`: discovery, analysis, validation, retry, persistence.
 - `app/services/gemini.py`: Gemini prompt and repair prompt boundary.
 - `app/services/native_youtube.py`: native YouTube Ask prompt, parser, and persistence.
