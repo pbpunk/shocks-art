@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 
 from sqlalchemy import func, select
@@ -12,6 +13,7 @@ from app.indexing.embedding_service import index_visual_trace_embeddings
 from app.indexing.qwen_backend import QwenSubprocessEmbeddingBackend
 from app.indexing.qwen_runtime import inspect_qwen_runtime
 from app.indexing.service import VisualExtractionConfig, index_all_visual_media, index_visual_media
+from app.indexing.visual_search import search_visual_embeddings
 from app.library_models import Embedding, IndexRun, Media, Trace  # noqa: F401 - registers indexing tables
 
 
@@ -48,6 +50,13 @@ def _parser() -> argparse.ArgumentParser:
     )
     embed_parser.add_argument("--limit", type=int, default=None)
     embed_parser.add_argument("--index-root", default=None)
+
+    search_parser = subparsers.add_parser(
+        "search-visual",
+        help="Embed a text query with Qwen and brute-force cosine search persisted visual vectors",
+    )
+    search_parser.add_argument("query")
+    search_parser.add_argument("--top-k", type=int, default=10)
 
     subparsers.add_parser("qwen-status", help="Report the pinned isolated Qwen runtime without loading it")
     subparsers.add_parser("status", help="Print machine-readable indexing table counts")
@@ -100,6 +109,36 @@ def main(argv: list[str] | None = None) -> int:
                 print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2))
                 return 1
             print(json.dumps({"ok": True, "result": result.as_dict()}, indent=2, sort_keys=True))
+            return 0
+
+        if args.command == "search-visual":
+            try:
+                backend = QwenSubprocessEmbeddingBackend()
+                embedding_started = time.perf_counter()
+                query_vector = backend.embed_text([args.query])[0]
+                query_embedding_ms = (time.perf_counter() - embedding_started) * 1000.0
+                result = search_visual_embeddings(
+                    db,
+                    query_vector=query_vector,
+                    model_id=backend.model_id,
+                    dimension=backend.dimension,
+                    top_k=args.top_k,
+                )
+            except Exception as exc:
+                print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2))
+                return 1
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "query": args.query,
+                        "queryEmbeddingMs": round(query_embedding_ms, 4),
+                        "result": result.as_dict(),
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
             return 0
 
         config = VisualExtractionConfig(sample_interval_seconds=args.interval)
