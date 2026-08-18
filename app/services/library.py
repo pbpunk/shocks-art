@@ -131,50 +131,50 @@ def ingest_local_media(db: Session, root: Path) -> IngestResult:
 
     for path in files:
         try:
-            resolved = path.resolve()
-            stat = resolved.stat()
-            source_id = str(resolved)
-            existing = db.scalar(
-                select(Media).where(Media.source_type == "local", Media.source_id == source_id)
-            )
+            with db.begin_nested():
+                resolved = path.resolve()
+                stat = resolved.stat()
+                source_id = str(resolved)
+                existing = db.scalar(
+                    select(Media).where(Media.source_type == "local", Media.source_id == source_id)
+                )
 
-            if existing and existing.size_bytes == stat.st_size and existing.source_modified_ns == stat.st_mtime_ns:
-                skipped += 1
-                continue
+                if existing and existing.size_bytes == stat.st_size and existing.source_modified_ns == stat.st_mtime_ns:
+                    skipped += 1
+                    continue
 
-            checksum = file_checksum(resolved)
-            duplicate = db.scalar(select(Media).where(Media.checksum_sha256 == checksum))
-            probe = probe_media(resolved)
-            mime_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
+                checksum = file_checksum(resolved)
+                duplicate = db.scalar(select(Media).where(Media.checksum_sha256 == checksum))
+                probe = probe_media(resolved)
+                mime_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
 
-            if duplicate and duplicate.media_id != getattr(existing, "media_id", None):
-                skipped += 1
-                continue
+                if duplicate and duplicate.media_id != getattr(existing, "media_id", None):
+                    skipped += 1
+                    continue
 
-            media = existing or Media(source_type="local", source_id=source_id)
-            media.title = resolved.stem
-            media.filename = resolved.name
-            media.source_path = str(resolved)
-            media.mime_type = mime_type
-            media.media_kind = media_kind_for_path(resolved)
-            media.size_bytes = stat.st_size
-            media.source_modified_ns = stat.st_mtime_ns
-            media.checksum_sha256 = checksum
-            media.duration_seconds = probe.get("duration_seconds")
-            media.width = probe.get("width", 0)
-            media.height = probe.get("height", 0)
-            media.processing_status = "discovered"
-            media.metadata_json = {
-                "relative_path": display_ingest_path(resolved, root),
-                "ffprobe_available": bool(shutil.which("ffprobe")),
-            }
-            if existing:
-                updated += 1
-            else:
-                db.add(media)
-                created += 1
+                media = existing or Media(source_type="local", source_id=source_id)
+                media.title = resolved.stem
+                media.filename = resolved.name
+                media.source_path = str(resolved)
+                media.mime_type = mime_type
+                media.media_kind = media_kind_for_path(resolved)
+                media.size_bytes = stat.st_size
+                media.source_modified_ns = stat.st_mtime_ns
+                media.checksum_sha256 = checksum
+                media.duration_seconds = probe.get("duration_seconds")
+                media.width = probe.get("width", 0)
+                media.height = probe.get("height", 0)
+                media.processing_status = "discovered"
+                media.metadata_json = {
+                    "relative_path": display_ingest_path(resolved, root),
+                    "ffprobe_available": bool(shutil.which("ffprobe")),
+                }
+                if existing:
+                    updated += 1
+                else:
+                    db.add(media)
+                    created += 1
         except Exception as exc:
-            db.rollback()
             failures.append(
                 IngestFailure(
                     path=display_ingest_path(path, root),
