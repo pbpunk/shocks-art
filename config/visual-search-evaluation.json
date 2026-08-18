@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "description": "Blind semantic visual-search evaluation. Query scoring and ranking must not use source filename, title, or path metadata.",
+  "dimensions": [2048, 1024, 512, 256],
+  "topK": 10,
+  "queries": [
+    {
+      "id": "guitar-playing",
+      "kind": "positive",
+      "text": "man playing guitar",
+      "note": "Known-present visual concept in the provisional validation corpus."
+    },
+    {
+      "id": "guitar-holding",
+      "kind": "positive",
+      "text": "person holding a guitar",
+      "note": "Semantic paraphrase of the same known-present visual concept."
+    },
+    {
+      "id": "string-instrument-performance",
+      "kind": "positive",
+      "text": "musician performing with a string instrument",
+      "note": "Broader semantic paraphrase of the known-present guitar footage."
+    },
+    {
+      "id": "control-sports-car",
+      "kind": "control",
+      "text": "red sports car",
+      "note": "Absent-object control; verify visually before using as a final negative label."
+    },
+    {
+      "id": "control-snowy-mountain",
+      "kind": "control",
+      "text": "snowy mountain landscape",
+      "note": "Absent-scene control; verify visually before using as a final negative label."
+    },
+    {
+      "id": "control-dog-swimming",
+      "kind": "control",
+      "text": "dog swimming in a pool",
+      "note": "Absent-action control; verify visually before using as a final negative label."
+    }
+  ]
+}
