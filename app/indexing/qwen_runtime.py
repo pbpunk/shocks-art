@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,8 +23,34 @@ class QwenRuntimeConfig:
     dtype: str
     qwen_repository: str
     qwen_commit: str
+    instruction: str
     recommended_image_batch_size: int
     largest_validated_image_batch_size: int
+
+    @property
+    def embedding_configuration_hash(self) -> str:
+        """Stable identity for settings that can change semantic vectors.
+
+        Throughput-only settings such as batch size are intentionally excluded.
+        The hash changes when the model snapshot, implementation, dtype,
+        instruction, or native dimension changes, preventing silent generation
+        mixing in the Embedding table.
+        """
+
+        payload = {
+            "modelId": self.model_id,
+            "modelRevision": self.model_revision,
+            "qwenCommit": self.qwen_commit,
+            "dtype": self.dtype,
+            "nativeDimension": self.native_dimension,
+            "instruction": self.instruction,
+        }
+        encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        return hashlib.sha256(encoded).hexdigest()
+
+    @property
+    def embedding_generation_id(self) -> str:
+        return f"{self.model_id}@{self.model_revision[:12]}#cfg-{self.embedding_configuration_hash[:12]}"
 
 
 @dataclass(frozen=True)
@@ -59,6 +86,8 @@ class QwenRuntimeStatus:
             "qwenCommit": self.config.qwen_commit,
             "nativeDimension": self.config.native_dimension,
             "dtype": self.config.dtype,
+            "embeddingGenerationId": self.config.embedding_generation_id,
+            "embeddingConfigurationHash": self.config.embedding_configuration_hash,
             "recommendedImageBatchSize": self.config.recommended_image_batch_size,
             "largestValidatedImageBatchSize": self.config.largest_validated_image_batch_size,
             "paths": {
@@ -94,6 +123,7 @@ def load_qwen_runtime_config(path: Path | None = None) -> QwenRuntimeConfig:
             dtype=str(payload["model"]["dtype"]),
             qwen_repository=str(payload["qwenSource"]["repository"]),
             qwen_commit=str(payload["qwenSource"]["commit"]),
+            instruction=str(payload["inference"]["instruction"]),
             recommended_image_batch_size=int(payload["inference"]["recommendedImageBatchSize"]),
             largest_validated_image_batch_size=int(payload["inference"]["largestValidatedImageBatchSize"]),
         )
@@ -108,6 +138,8 @@ def load_qwen_runtime_config(path: Path | None = None) -> QwenRuntimeConfig:
         raise EmbeddingBackendError("Qwen model identity/revision must not be empty.")
     if not config.qwen_repository.strip() or not config.qwen_commit.strip():
         raise EmbeddingBackendError("Qwen source repository/commit must not be empty.")
+    if not config.instruction.strip():
+        raise EmbeddingBackendError("Qwen inference instruction must not be empty.")
     if config.native_dimension <= 0:
         raise EmbeddingBackendError("Qwen nativeDimension must be greater than zero.")
     if config.recommended_image_batch_size <= 0:
