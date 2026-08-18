@@ -48,7 +48,9 @@ def test_api_dashboard_and_fixture(client):
     assert response.json()["stream_id"]
     dashboard = client.get("/")
     assert dashboard.status_code == 200
-    assert "Shocks Art Clips" in dashboard.text
+    assert 'data-app-tab="clips"' in dashboard.text
+    assert 'href="/library"' in dashboard.text
+    assert 'href="/debug"' in dashboard.text
     pipeline = client.get("/pipeline")
     assert pipeline.status_code == 200
     assert "Livestream Pipeline" in pipeline.text
@@ -64,7 +66,9 @@ def test_prefixed_app_path_renders_internal_links(client):
 
     assert response.status_code == 200
     assert 'href="/shocks_art/static/styles.css?v=analytics-mobile-1"' in response.text
-    assert 'href="/shocks_art/pipeline"' in response.text
+    assert 'href="/shocks_art/"' in response.text
+    assert 'href="/shocks_art/library"' in response.text
+    assert 'href="/shocks_art/debug"' in response.text
 
 
 def test_tailscale_forwarded_host_renders_prefixed_links(client):
@@ -72,7 +76,9 @@ def test_tailscale_forwarded_host_renders_prefixed_links(client):
 
     assert response.status_code == 200
     assert 'href="/shocks_art/static/styles.css?v=analytics-mobile-1"' in response.text
-    assert 'href="/shocks_art/pipeline"' in response.text
+    assert 'href="/shocks_art/"' in response.text
+    assert 'href="/shocks_art/library"' in response.text
+    assert 'href="/shocks_art/debug"' in response.text
 
 
 def test_prefixed_actions_redirect_with_prefix(client, monkeypatch):
