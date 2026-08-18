@@ -96,6 +96,22 @@ The app genuinely serves `/shocks_art`; the gateway is not expected to strip the
 
 Use the dashboard button `Load Fixture` to create a sample queued livestream. Automated tests use mocked YouTube and Gemini behavior so they do not spend API quota.
 
+## Library indexing
+
+Library source ingestion and derived indexing are separate. `LIBRARY_INGEST_PATH` points at temporary/local validation source media; generated Trace artifacts are written under `LIBRARY_INDEX_PATH` (default `./data/library_index`) and are ignored by Git.
+
+The indexing CLI runs independently of FastAPI:
+
+```powershell
+python -m app.indexing status
+python -m app.indexing index-media media_xxx
+python -m app.indexing index-pending
+```
+
+The current visual-extraction baseline creates one visual Trace for each still image and samples video every five seconds. Extraction is idempotent by Media/type/timestamp/extractor/version/configuration. A rerun reuses existing artifacts, resumes after interrupted work, and repairs a missing generated artifact without duplicating the Trace row. Sampling policy will be tuned separately as the validation corpus expands to longer footage.
+
+No GPU or ML dependency is required for this stage. Multimodal embeddings and local speech transcription are later indexing layers.
+
 ## Real Single-Stream Smoke Test
 
 1. Configure `.env`.
@@ -142,7 +158,7 @@ The first run may require signing in or dismissing YouTube UI in the opened brow
 pytest
 ```
 
-`tests/test_framework_contract.py` covers the manifest, health identity, API ping, namespaced routes, and JARVIS shell behavior.
+`tests/test_framework_contract.py` covers the manifest, health identity, API ping, namespaced routes, and JARVIS shell behavior. `tests/test_indexing.py` covers the Trace/Embedding/IndexRun schema plus deterministic visual extraction, idempotent reuse, interrupted-run resume, and artifact repair without requiring FFmpeg or GPU inference.
 
 ## Main Paths
 
@@ -150,6 +166,8 @@ pytest
 - `tools/app_contract.ps1`: shared lifecycle ownership and verification helpers.
 - `schemas/candidate_window.schema.v1.json`: Gemini output contract.
 - `app/models.py`: asset lineage entities.
+- `app/library_models.py`: generic Media, Trace, Embedding, and IndexRun entities.
+- `app/indexing/`: standalone Library indexing service and CLI.
 - `app/services/processing.py`: discovery, analysis, validation, retry, persistence.
 - `app/services/gemini.py`: Gemini prompt and repair prompt boundary.
 - `app/services/native_youtube.py`: native YouTube Ask prompt, parser, and persistence.
