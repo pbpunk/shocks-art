@@ -130,6 +130,7 @@ def ingest_local_media(db: Session, root: Path) -> IngestResult:
     failures: list[IngestFailure] = []
 
     for path in files:
+        outcome: str | None = None
         try:
             with db.begin_nested():
                 resolved = path.resolve()
@@ -170,10 +171,15 @@ def ingest_local_media(db: Session, root: Path) -> IngestResult:
                     "ffprobe_available": bool(shutil.which("ffprobe")),
                 }
                 if existing:
-                    updated += 1
+                    outcome = "updated"
                 else:
                     db.add(media)
-                    created += 1
+                    outcome = "created"
+
+            if outcome == "created":
+                created += 1
+            elif outcome == "updated":
+                updated += 1
         except Exception as exc:
             failures.append(
                 IngestFailure(
