@@ -279,6 +279,30 @@ def _find_existing_trace(
     )
 
 
+def _all_visual_artifacts_reusable(
+    db: Session,
+    *,
+    media: Media,
+    timestamps: list[int],
+    index_root: Path,
+    backend: FrameExtractionBackend,
+    config: VisualExtractionConfig,
+) -> bool:
+    for timestamp_ms in timestamps:
+        existing = _find_existing_trace(
+            db,
+            media=media,
+            timestamp_ms=timestamp_ms,
+            backend=backend,
+            config=config,
+        )
+        relative_artifact = _artifact_relative_path(media, timestamp_ms, backend, config)
+        absolute_artifact = index_root / relative_artifact
+        if existing is None or not absolute_artifact.is_file() or absolute_artifact.stat().st_size <= 0:
+            return False
+    return True
+
+
 def index_visual_media(
     db: Session,
     media: Media,
@@ -288,12 +312,43 @@ def index_visual_media(
     config: VisualExtractionConfig | None = None,
     retriever: MediaRetriever | None = None,
 ) -> VisualIndexResult:
-    """Extract restart-safe visual Traces, materializing remote bytes only for this job."""
+    """Extract restart-safe visual Traces, materializing remote bytes only when needed."""
 
     backend = backend or FfmpegFrameBackend()
     config = config or VisualExtractionConfig()
     retriever = retriever or DefaultMediaRetriever()
     timestamps = visual_sample_timestamps_ms(media, config)
+
+    if _all_visual_artifacts_reusable(
+        db,
+        media=media,
+        timestamps=timestamps,
+        index_root=index_root,
+        backend=backend,
+        config=config,
+    ):
+        run = IndexRun(
+            media_id=media.media_id,
+            stage="visual_extract",
+            configuration_hash=config.configuration_hash,
+            status="complete",
+            started_at=now_utc(),
+            completed_at=now_utc(),
+            statistics_json={"expected": len(timestamps), "created": 0, "reused": len(timestamps), "repaired": 0},
+        )
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        return VisualIndexResult(
+            media_id=media.media_id,
+            index_run_id=run.index_run_id,
+            expected=len(timestamps),
+            created=0,
+            reused=len(timestamps),
+            repaired=0,
+            status="complete",
+        )
+
     run = IndexRun(
         media_id=media.media_id,
         stage="visual_extract",
