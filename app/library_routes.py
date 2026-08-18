@@ -12,6 +12,7 @@ from starlette.requests import Request
 
 from app.core.config import get_settings
 from app.core.database import get_db
+from app.indexing.environment import collect_indexing_environment
 from app.indexing.service import (
     VisualExtractionConfig,
     effective_sample_interval_seconds,
@@ -207,6 +208,12 @@ def library_indexing_sampling_plan(db: Session = Depends(get_db)):
         "items": plans,
         "referenceDurations": references,
     }
+
+
+@router.get("/api/library/indexing/environment")
+def library_indexing_environment():
+    """Read-only host/runtime audit; heavyweight ML probes run out-of-process."""
+    return collect_indexing_environment()
 
 
 @router.post("/api/library/ingest")
