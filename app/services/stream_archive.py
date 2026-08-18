@@ -1,5 +1,4 @@
 import json
-import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -8,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import ROOT_DIR
 from app.models import AnalysisRun, Stream, StreamAnalysisArtifact, StreamTranscript
+from app.services.ytdlp import fetch_youtube_auto_captions
 
 
 CAPTIONS_DIR = ROOT_DIR / "data" / "captions"
@@ -69,19 +69,10 @@ def try_ensure_stream_transcript(db: Session, stream: Stream, fetch_missing: boo
 
 def fetch_caption_file(stream: Stream, caption_path: Path) -> None:
     caption_path.parent.mkdir(parents=True, exist_ok=True)
-    command = [
-        "yt-dlp",
-        "--skip-download",
-        "--write-auto-subs",
-        "--sub-langs",
-        "en-orig",
-        "--sub-format",
-        "json3",
-        "-o",
-        str(CAPTIONS_DIR / "%(id)s.%(ext)s"),
-        stream.url,
-    ]
-    subprocess.run(command, cwd=ROOT_DIR, check=False, capture_output=True, text=True)
+    fetch_youtube_auto_captions(
+        url=stream.url,
+        output_template=CAPTIONS_DIR / "%(id)s.%(ext)s",
+    )
 
 
 def transcript_text_from_json3(path: Path) -> str:

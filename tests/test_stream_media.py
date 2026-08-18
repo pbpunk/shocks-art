@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import create_engine, func, select
@@ -15,6 +14,7 @@ from app.indexing.service import VisualExtractionConfig, index_visual_media
 from app.indexing.stream_media import sync_all_stream_media
 from app.library_models import Media, Trace
 from app.models import Stream, StreamTranscript
+from app.services.ytdlp import YtDlpError
 
 
 class FakeFrameBackend:
@@ -137,23 +137,23 @@ def test_ytdlp_retriever_cleans_successful_scratch_lease(tmp_path, monkeypatch):
         sync_all_stream_media(db, import_language=False)
         media = db.scalar(select(Media).where(Media.source_id == stream.source_video_id))
         scratch = tmp_path / "scratch"
+        calls = []
 
-        monkeypatch.setattr("app.indexing.media_retrieval.shutil.which", lambda name: "yt-dlp.exe")
+        def fake_fetch(**kwargs):
+            calls.append(kwargs)
+            kwargs["expected_path"].parent.mkdir(parents=True, exist_ok=True)
+            kwargs["expected_path"].write_bytes(b"temporary-video")
+            return kwargs["expected_path"]
 
-        def fake_run(command, **kwargs):
-            template = Path(command[command.index("-o") + 1])
-            output = Path(str(template).replace("%(ext)s", "mp4"))
-            output.parent.mkdir(parents=True, exist_ok=True)
-            output.write_bytes(b"temporary-video")
-            return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-        monkeypatch.setattr("app.indexing.media_retrieval.subprocess.run", fake_run)
+        monkeypatch.setattr("app.indexing.media_retrieval.download_youtube_source", fake_fetch)
         retriever = YtDlpMediaRetriever(scratch_root=scratch)
         with retriever.materialize(media) as materialized:
             leased_path = materialized.path
             assert leased_path.is_file()
             assert materialized.temporary is True
             assert materialized.size_bytes == len(b"temporary-video")
+        assert len(calls) == 1
+        assert calls[0]["url"] == media.source_url
         assert not leased_path.exists()
         assert scratch.exists()
         assert list(scratch.iterdir()) == []
@@ -168,11 +168,11 @@ def test_ytdlp_retriever_cleans_scratch_after_failure(tmp_path, monkeypatch):
         sync_all_stream_media(db, import_language=False)
         media = db.scalar(select(Media).where(Media.source_id == stream.source_video_id))
         scratch = tmp_path / "scratch"
-        monkeypatch.setattr("app.indexing.media_retrieval.shutil.which", lambda name: "yt-dlp.exe")
-        monkeypatch.setattr(
-            "app.indexing.media_retrieval.subprocess.run",
-            lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout="", stderr="network failed"),
-        )
+
+        def fake_fetch(**kwargs):
+            raise YtDlpError("network failed")
+
+        monkeypatch.setattr("app.indexing.media_retrieval.download_youtube_source", fake_fetch)
         retriever = YtDlpMediaRetriever(scratch_root=scratch)
         with pytest.raises(MediaRetrievalError, match="network failed"):
             with retriever.materialize(media):

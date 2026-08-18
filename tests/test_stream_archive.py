@@ -51,6 +51,33 @@ def test_ensure_stream_transcript_persists_caption_text(db_session, tmp_path, mo
     assert "01:05 second line" in transcript.text
 
 
+def test_fetch_missing_transcript_uses_shared_ytdlp_adapter(db_session, tmp_path, monkeypatch):
+    stream = make_stream(db_session)
+    captions_dir = tmp_path / "captions"
+    calls = []
+
+    monkeypatch.setattr("app.services.stream_archive.CAPTIONS_DIR", captions_dir)
+
+    def fake_fetch(**kwargs):
+        calls.append(kwargs)
+        captions_dir.mkdir(parents=True, exist_ok=True)
+        (captions_dir / "fixture_video_123.en-orig.json3").write_text(
+            json.dumps({"events": [{"tStartMs": 1000, "segs": [{"utf8": "fetched caption"}]}]}),
+            encoding="utf-8",
+        )
+        return True
+
+    monkeypatch.setattr("app.services.stream_archive.fetch_youtube_auto_captions", fake_fetch)
+
+    transcript = ensure_stream_transcript(db_session, stream, fetch_missing=True)
+
+    assert transcript is not None
+    assert transcript.text == "00:01 fetched caption"
+    assert len(calls) == 1
+    assert calls[0]["url"] == stream.url
+    assert calls[0]["output_template"] == captions_dir / "%(id)s.%(ext)s"
+
+
 def test_save_structured_pass_artifacts_persists_prompt_and_conversation_files(db_session, tmp_path):
     stream = make_stream(db_session)
     run = AnalysisRun(

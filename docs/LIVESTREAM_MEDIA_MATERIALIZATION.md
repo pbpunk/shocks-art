@@ -19,12 +19,33 @@ The existing `StreamTranscript.raw_location` JSON3 caption artifact can be conve
 
 `Media.checksum_sha256` predates remote Media and is non-null/unique in the current SQLite schema. Until that schema is generalized, YouTube Media uses a deterministic SHA-256 **source identity fingerprint**, explicitly marked in `metadata_json.checksum_kind = youtube_source_identity`; it must not be interpreted as a content checksum.
 
+## One yt-dlp integration
+
+All production yt-dlp command construction/execution is owned by `app/services/ytdlp.py`.
+
+The shared source-byte fetcher preserves the Generate/Download behavior proven on the workstation:
+
+- `youtube:player_client=mweb`
+- ordered format fallback, preferring MP4-compatible formats
+- one subprocess/progress parser
+- clear failure propagation
+- one returned canonical source path
+
+Clips and Library reuse that exact acquisition policy. They differ only in **retention**:
+
+- Clips downloads into `data/source_videos` and may retain a valid source cache for repeated editorial clip generation.
+- Library downloads into a per-job `LIBRARY_SCRATCH_PATH` lease and always removes the full source when the lease closes.
+
+YouTube auto-caption retrieval also routes through the same yt-dlp adapter, using `--skip-download`; caption fetching does not download source-video bytes.
+
+Do not add a second production yt-dlp command in Clips, Library, or transcript code. Tests enforce centralized command ownership.
+
 ## Temporary source lifecycle
 
 When a stage actually needs video bytes, `DefaultMediaRetriever` resolves the Media source:
 
 - local Media: lease the existing local source path; no cleanup ownership
-- YouTube Media: yt-dlp downloads one source into `LIBRARY_SCRATCH_PATH/<media-job>/`
+- YouTube Media: the shared yt-dlp adapter downloads one source into `LIBRARY_SCRATCH_PATH/<media-job>/`
 
 The temporary directory is removed in a `finally` block when the materialization lease closes, including extraction failures. Persistent derived artifacts such as visual Trace JPEGs remain under `LIBRARY_INDEX_PATH`; the full remote source does not.
 
@@ -68,10 +89,12 @@ python -m app.indexing index-pending --include-remote
 
 Do not use that flag casually against a large archive. The later persistent job queue will control remote indexing deliberately and sequentially.
 
-## Existing Clips behavior
+## Host runtime
 
-This does not change `app/services/clip_download.py`. Clips may retain its existing source cache because editorial clip generation has different caching requirements. Library does not rely on that cache and does not create a permanent mirror of the livestream archive.
+The source fetcher depends on the host `yt-dlp` runtime rather than importing yt-dlp into FastAPI. Keep the workstation yt-dlp/JavaScript challenge runtime current and validate it through the real Generate/Download and `materialize-media` flows after runtime changes.
+
+The application must continue to import and serve when optional indexing/ML runtimes are unavailable.
 
 ## Deferred work
 
-Private-YouTube authentication/range retrieval, shared Clips/Library yt-dlp primitives, stale scratch recovery after hard process termination, and the durable worker queue remain later retrieval/operations work. This implementation establishes the lifecycle early because livestream Media is immediately useful as the organic Library corpus.
+Private-YouTube authentication/range retrieval, stale scratch recovery after hard process termination, and the durable worker queue remain later retrieval/operations work. The shared acquisition primitive and temporary Library lifecycle are established now so future retrieval work extends one implementation rather than creating another downloader.

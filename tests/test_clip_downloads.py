@@ -1,13 +1,7 @@
 from pathlib import Path
 
 from app.models import DerivedAsset
-from app.services.clip_download import (
-    ClipDownloadError,
-    YTDLP_EXTRACTOR_ARGS,
-    YTDLP_FORMATS,
-    generate_clip_file,
-    read_progress,
-)
+from app.services.clip_download import generate_clip_file, read_progress
 from tests.test_ranking_exports_api import create_candidate
 
 
@@ -65,64 +59,45 @@ def test_archived_candidate_download_returns_404(client, db_session, valid_candi
     assert response.status_code == 404
 
 
-def test_generate_clip_file_uses_ytdlp_and_ffmpeg(db_session, valid_candidate_data, tmp_path, monkeypatch):
+def test_generate_clip_file_uses_shared_source_fetcher_and_ffmpeg(
+    db_session,
+    valid_candidate_data,
+    tmp_path,
+    monkeypatch,
+):
     candidate = create_candidate(db_session, valid_candidate_data)
     source_dir = tmp_path / "source"
     clip_dir = tmp_path / "clips"
-    commands = []
+    fetch_calls = []
+    ffmpeg_commands = []
 
     monkeypatch.setattr("app.services.clip_download.SOURCE_VIDEO_DIR", source_dir)
     monkeypatch.setattr("app.services.clip_download.DERIVED_CLIP_DIR", clip_dir)
 
-    def fake_ytdlp(db, candidate_arg, command):
-        commands.append(command)
-        source_dir.mkdir(parents=True, exist_ok=True)
-        (source_dir / f"{candidate.stream.source_video_id}.mp4").write_bytes(b"source")
+    def fake_fetch(**kwargs):
+        fetch_calls.append(kwargs)
+        kwargs["expected_path"].parent.mkdir(parents=True, exist_ok=True)
+        kwargs["expected_path"].write_bytes(b"source")
+        return kwargs["expected_path"]
 
     def fake_ffmpeg(db, candidate_arg, command, duration):
-        commands.append(command)
+        ffmpeg_commands.append(command)
         Path(command[-1]).write_bytes(b"clip")
 
-    monkeypatch.setattr("app.services.clip_download.run_ytdlp_command", fake_ytdlp)
+    monkeypatch.setattr("app.services.clip_download.download_youtube_source", fake_fetch)
     monkeypatch.setattr("app.services.clip_download.run_ffmpeg_command", fake_ffmpeg)
 
     output = generate_clip_file(db_session, candidate)
 
     assert output == clip_dir / f"{candidate.candidate_window_id}.mp4"
     assert output.read_bytes() == b"clip"
-    assert commands[0][0] == "yt-dlp"
-    assert commands[0][2] == YTDLP_EXTRACTOR_ARGS
-    assert commands[0][4] == YTDLP_FORMATS[0]
-    assert commands[1][0] == "ffmpeg"
-    assert str(candidate.start_seconds) in commands[1]
-
-
-def test_generate_clip_file_falls_back_to_alternate_ytdlp_format(db_session, valid_candidate_data, tmp_path, monkeypatch):
-    candidate = create_candidate(db_session, valid_candidate_data)
-    source_dir = tmp_path / "source"
-    clip_dir = tmp_path / "clips"
-    commands = []
-
-    monkeypatch.setattr("app.services.clip_download.SOURCE_VIDEO_DIR", source_dir)
-    monkeypatch.setattr("app.services.clip_download.DERIVED_CLIP_DIR", clip_dir)
-
-    def fake_ytdlp(db, candidate_arg, command):
-        commands.append(command)
-        if command[4] == YTDLP_FORMATS[0]:
-            raise ClipDownloadError("primary format failed")
-        source_dir.mkdir(parents=True, exist_ok=True)
-        (source_dir / f"{candidate.stream.source_video_id}.mp4").write_bytes(b"source")
-
-    def fake_ffmpeg(db, candidate_arg, command, duration):
-        Path(command[-1]).write_bytes(b"clip")
-
-    monkeypatch.setattr("app.services.clip_download.run_ytdlp_command", fake_ytdlp)
-    monkeypatch.setattr("app.services.clip_download.run_ffmpeg_command", fake_ffmpeg)
-
-    output = generate_clip_file(db_session, candidate)
-
-    assert output == clip_dir / f"{candidate.candidate_window_id}.mp4"
-    assert [command[4] for command in commands] == YTDLP_FORMATS
+    assert len(fetch_calls) == 1
+    assert fetch_calls[0]["url"] == candidate.stream.url
+    assert fetch_calls[0]["output_template"] == source_dir / "%(id)s.%(ext)s"
+    assert fetch_calls[0]["expected_path"] == source_dir / f"{candidate.stream.source_video_id}.mp4"
+    assert callable(fetch_calls[0]["progress_callback"])
+    assert ffmpeg_commands[0][0] == "ffmpeg"
+    assert str(candidate.start_seconds) in ffmpeg_commands[0]
 
 
 def test_generate_clip_file_replaces_tiny_source_cache(db_session, valid_candidate_data, tmp_path, monkeypatch):
@@ -132,17 +107,47 @@ def test_generate_clip_file_replaces_tiny_source_cache(db_session, valid_candida
     source_dir.mkdir(parents=True)
     cached_source = source_dir / f"{candidate.stream.source_video_id}.mp4"
     cached_source.write_bytes(b"partial")
+    fetch_calls = []
 
     monkeypatch.setattr("app.services.clip_download.SOURCE_VIDEO_DIR", source_dir)
     monkeypatch.setattr("app.services.clip_download.DERIVED_CLIP_DIR", clip_dir)
 
-    def fake_ytdlp(db, candidate_arg, command):
-        cached_source.write_bytes(b"x" * 1_000_000)
+    def fake_fetch(**kwargs):
+        fetch_calls.append(kwargs)
+        kwargs["expected_path"].write_bytes(b"x" * 1_000_000)
+        return kwargs["expected_path"]
 
     def fake_ffmpeg(db, candidate_arg, command, duration):
         Path(command[-1]).write_bytes(b"clip")
 
-    monkeypatch.setattr("app.services.clip_download.run_ytdlp_command", fake_ytdlp)
+    monkeypatch.setattr("app.services.clip_download.download_youtube_source", fake_fetch)
+    monkeypatch.setattr("app.services.clip_download.run_ffmpeg_command", fake_ffmpeg)
+
+    output = generate_clip_file(db_session, candidate)
+
+    assert output == clip_dir / f"{candidate.candidate_window_id}.mp4"
+    assert cached_source.stat().st_size == 1_000_000
+    assert len(fetch_calls) == 1
+
+
+def test_generate_clip_file_reuses_valid_source_cache(db_session, valid_candidate_data, tmp_path, monkeypatch):
+    candidate = create_candidate(db_session, valid_candidate_data)
+    source_dir = tmp_path / "source"
+    clip_dir = tmp_path / "clips"
+    source_dir.mkdir(parents=True)
+    cached_source = source_dir / f"{candidate.stream.source_video_id}.mp4"
+    cached_source.write_bytes(b"x" * 1_000_000)
+
+    monkeypatch.setattr("app.services.clip_download.SOURCE_VIDEO_DIR", source_dir)
+    monkeypatch.setattr("app.services.clip_download.DERIVED_CLIP_DIR", clip_dir)
+    monkeypatch.setattr(
+        "app.services.clip_download.download_youtube_source",
+        lambda **kwargs: (_ for _ in ()).throw(AssertionError("shared fetcher should not run for valid cache")),
+    )
+
+    def fake_ffmpeg(db, candidate_arg, command, duration):
+        Path(command[-1]).write_bytes(b"clip")
+
     monkeypatch.setattr("app.services.clip_download.run_ffmpeg_command", fake_ffmpeg)
 
     output = generate_clip_file(db_session, candidate)

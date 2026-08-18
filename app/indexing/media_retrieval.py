@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 import shutil
-import subprocess
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import ContextManager, Iterator, Protocol
 
-from app.core.config import ROOT_DIR, get_settings
+from app.core.config import get_settings
 from app.library_models import Media
+from app.services.ytdlp import YtDlpError, download_youtube_source
 
 
 class MediaRetrievalError(RuntimeError):
@@ -43,56 +43,30 @@ class LocalMediaRetriever:
 
 
 class YtDlpMediaRetriever:
-    """Download one remote Media item into a disposable per-job scratch lease."""
+    """Lease one remote Media item through the shared YouTube source fetcher."""
 
     def __init__(self, scratch_root: Path | None = None):
         settings = get_settings()
         self.scratch_root = Path(scratch_root or settings.library_scratch_path)
 
-    def _command(self, media: Media, output_template: Path) -> list[str]:
-        executable = shutil.which("yt-dlp")
-        if not executable:
-            raise MediaRetrievalError("yt-dlp executable is not available on PATH")
-        if not media.source_url:
-            raise MediaRetrievalError(f"remote Media has no source URL: {media.media_id}")
-        return [
-            executable,
-            "--no-playlist",
-            "-f",
-            "bv*+ba/b",
-            "--merge-output-format",
-            "mp4",
-            "-o",
-            str(output_template),
-            media.source_url,
-        ]
-
     @contextmanager
     def materialize(self, media: Media) -> Iterator[MaterializedMedia]:
+        if not media.source_url:
+            raise MediaRetrievalError(f"remote Media has no source URL: {media.media_id}")
+
         self.scratch_root.mkdir(parents=True, exist_ok=True)
         temp_dir = Path(tempfile.mkdtemp(prefix=f"{media.media_id}-", dir=self.scratch_root))
         try:
-            output_template = temp_dir / "source.%(ext)s"
-            command = self._command(media, output_template)
-            completed = subprocess.run(
-                command,
-                cwd=ROOT_DIR,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            if completed.returncode != 0:
-                detail = (completed.stderr or completed.stdout or "").strip()
-                raise MediaRetrievalError(f"yt-dlp materialization failed: {detail[-1200:]}")
+            try:
+                path = download_youtube_source(
+                    url=media.source_url,
+                    output_template=temp_dir / "source.%(ext)s",
+                    expected_path=temp_dir / "source.mp4",
+                    label=f"Media {media.media_id}",
+                )
+            except YtDlpError as exc:
+                raise MediaRetrievalError(f"yt-dlp materialization failed: {exc}") from exc
 
-            candidates = sorted(
-                path
-                for path in temp_dir.iterdir()
-                if path.is_file() and not path.name.endswith((".part", ".ytdl"))
-            )
-            if not candidates:
-                raise MediaRetrievalError("yt-dlp did not produce a source media file")
-            path = max(candidates, key=lambda item: item.stat().st_size)
             yield MaterializedMedia(
                 path=path,
                 temporary=True,

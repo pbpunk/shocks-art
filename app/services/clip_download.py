@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import ROOT_DIR
 from app.core.database import SessionLocal
 from app.models import CandidateWindow, DerivedAsset
+from app.services.ytdlp import YtDlpError, download_youtube_source
 
 
 SOURCE_VIDEO_DIR = ROOT_DIR / "data" / "source_videos"
@@ -17,12 +18,6 @@ DERIVED_CLIP_DIR = ROOT_DIR / "data" / "derived_clips"
 ASSET_TYPE = "source_clip_mp4"
 TOOL_USED = "yt-dlp+ffmpeg"
 MIN_SOURCE_VIDEO_BYTES = 1_000_000
-YTDLP_EXTRACTOR_ARGS = "youtube:player_client=mweb"
-YTDLP_FORMATS = [
-    "best[ext=mp4]/best",
-    "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-]
-
 
 logger = logging.getLogger(__name__)
 
@@ -218,73 +213,29 @@ def ensure_source_video(db: Session, candidate: CandidateWindow) -> Path:
             update_clip_asset_progress(db, candidate, "processing", 70, "source cached")
             return path
         path.unlink()
-    SOURCE_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
-    output_template = SOURCE_VIDEO_DIR / "%(id)s.%(ext)s"
-    last_error: ClipDownloadError | None = None
-    for format_selector in YTDLP_FORMATS:
-        command = [
-            "yt-dlp",
-            "--extractor-args",
-            YTDLP_EXTRACTOR_ARGS,
-            "-f",
-            format_selector,
-            "--merge-output-format",
-            "mp4",
-            "--newline",
-            "-o",
-            str(output_template),
-            candidate.stream.url,
-        ]
-        try:
-            run_ytdlp_command(db, candidate, command)
-            break
-        except ClipDownloadError as exc:
-            last_error = exc
-            logger.warning(
-                "yt-dlp failed for candidate %s with format selector %s",
-                candidate.candidate_window_id,
-                format_selector,
-            )
-    else:
-        if last_error:
-            raise last_error
-    if path.exists():
-        return path
-    matches = list(SOURCE_VIDEO_DIR.glob(f"{source_video_id}.*"))
-    if matches:
-        matches[0].replace(path)
-        return path
-    raise ClipDownloadError("yt-dlp did not produce a source video file")
 
+    def update_download_progress(percent: float) -> None:
+        update_clip_asset_progress(
+            db,
+            candidate,
+            "processing",
+            2 + int(percent * 0.68),
+            "downloading",
+        )
 
-def run_command(command: list[str], failure_message: str) -> None:
-    result = subprocess.run(command, cwd=ROOT_DIR, check=False, capture_output=True, text=True)
-    if result.returncode != 0:
-        details = (result.stderr or result.stdout or "").strip()
-        raise ClipDownloadError(f"{failure_message}: {details[:1000]}")
+    try:
+        source = download_youtube_source(
+            url=candidate.stream.url,
+            output_template=SOURCE_VIDEO_DIR / "%(id)s.%(ext)s",
+            expected_path=path,
+            progress_callback=update_download_progress,
+            label=f"candidate {candidate.candidate_window_id}",
+        )
+    except YtDlpError as exc:
+        raise ClipDownloadError(f"yt-dlp source download failed: {exc}") from exc
 
-
-def run_ytdlp_command(db: Session, candidate: CandidateWindow, command: list[str]) -> None:
-    process = subprocess.Popen(
-        command,
-        cwd=ROOT_DIR,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
-    output: list[str] = []
-    if process.stdout:
-        for line in process.stdout:
-            output.append(line)
-            percent = parse_ytdlp_percent(line)
-            if percent is not None:
-                update_clip_asset_progress(db, candidate, "processing", 2 + int(percent * 0.68), "downloading")
-    return_code = process.wait()
-    if return_code != 0:
-        raise ClipDownloadError(f"yt-dlp source download failed: {''.join(output)[-1000:].strip()}")
     update_clip_asset_progress(db, candidate, "processing", 70, "downloaded")
+    return source
 
 
 def run_ffmpeg_command(db: Session, candidate: CandidateWindow, command: list[str], duration: int) -> None:
@@ -311,13 +262,6 @@ def run_ffmpeg_command(db: Session, candidate: CandidateWindow, command: list[st
     if return_code != 0:
         raise ClipDownloadError(f"ffmpeg clip cut failed: {''.join(output)[-1000:].strip()}")
     update_clip_asset_progress(db, candidate, "processing", 99, "finalizing")
-
-
-def parse_ytdlp_percent(line: str) -> float | None:
-    match = re.search(r"\[download\]\s+(\d+(?:\.\d+)?)%", line)
-    if not match:
-        return None
-    return min(100.0, max(0.0, float(match.group(1))))
 
 
 def download_filename(candidate: CandidateWindow) -> str:
