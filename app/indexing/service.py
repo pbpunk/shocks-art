@@ -106,6 +106,12 @@ class VisualExtractionConfig:
     sample_interval_seconds: float = 5.0
     artifact_format: str = "jpg"
 
+    def __post_init__(self) -> None:
+        if self.sample_interval_seconds <= 0:
+            raise ValueError("sample_interval_seconds must be greater than zero")
+        if not self.artifact_format or not self.artifact_format.replace("-", "").isalnum():
+            raise ValueError("artifact_format must be a simple file extension")
+
     def as_payload(self) -> dict:
         return asdict(self)
 
@@ -135,7 +141,7 @@ def visual_sample_timestamps_ms(media: Media, config: VisualExtractionConfig) ->
     if media.media_kind != "video":
         return []
 
-    interval_ms = max(1, int(round(config.sample_interval_seconds * 1000)))
+    interval_ms = int(round(config.sample_interval_seconds * 1000))
     duration_ms = max(0, int(round((media.duration_seconds or 0) * 1000)))
     if duration_ms <= 0:
         return [0]
