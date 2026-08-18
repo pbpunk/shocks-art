@@ -7,7 +7,7 @@
   "repository": "https://github.com/pbpunk/shocks-art",
   "status": "active",
   "authoritative": true,
-  "updatedAt": "2026-08-17",
+  "updatedAt": "2026-08-18",
   "goal": "Searching a canonical concept such as Dragon Staff returns named livestream moments, related visual moments, and visually matching silent footage with inspectable provenance.",
   "executionLegend": {
     "github": "Can be implemented remotely as repository code/config/tests.",
@@ -65,7 +65,7 @@
     {"id": "IDX-002", "phase": "foundation", "title": "Implement idempotent local media ingestion", "status": "done", "execution": "github", "priority": "P0", "required": true, "dependsOn": ["IDX-001"], "acceptance": ["Repeat scans skip unchanged files and duplicate content."], "evidence": ["app/services/library.py"]},
     {"id": "IDX-003", "phase": "foundation", "title": "Expose real Library catalog and ingest action", "status": "done", "execution": "github", "priority": "P0", "required": true, "dependsOn": ["IDX-001", "IDX-002"], "acceptance": ["/library renders persisted Media and can trigger a scan."], "evidence": ["app/library_routes.py", "templates/library.html"]},
     {"id": "IDX-004", "phase": "foundation", "title": "Standardize JARVIS lifecycle and health foundation", "status": "done", "execution": "both", "priority": "P0", "required": true, "dependsOn": [], "acceptance": ["Standard Start/Stop/Restart/Update contract and namespaced health are available."], "evidence": ["jarvis.app.json", "Start App.cmd", "Update App.cmd"]},
-    {"id": "IDX-005", "phase": "corpus", "title": "Add ingestion diagnostics and machine-readable Media inventory", "status": "todo", "execution": "github", "priority": "P0", "required": true, "dependsOn": ["IDX-003"], "acceptance": ["Ingest failures expose file and reason.", "Inventory exposes Media ID, kind, duration, dimensions, size, processing status, and abbreviated hash."]},
+    {"id": "IDX-005", "phase": "corpus", "title": "Add ingestion diagnostics and machine-readable Media inventory", "status": "done", "execution": "github", "priority": "P0", "required": true, "dependsOn": ["IDX-003"], "acceptance": ["Ingest failures expose file and reason.", "Inventory exposes Media ID, kind, duration, dimensions, size, processing status, and abbreviated hash."], "evidence": ["app/services/library.py", "app/library_routes.py", "tests/test_library.py", "/api/library/media"]},
     {"id": "IDX-006", "phase": "corpus", "title": "Load the 14-item guitar corpus into the configured Library source", "status": "todo", "execution": "codex", "priority": "P0", "required": true, "dependsOn": ["IDX-005"], "acceptance": ["All 14 source items are visible to the local scanner."]},
     {"id": "IDX-007", "phase": "corpus", "title": "Validate corpus counts, metadata, idempotence, and large-file cost", "status": "todo", "execution": "codex", "priority": "P0", "required": true, "dependsOn": ["IDX-006"], "acceptance": ["Database contains exactly 14 intended corpus Media records: 7 video and 7 image.", "Second scan creates no duplicates.", "Hash/probe time for the large file is recorded."]},
     {"id": "IDX-008", "phase": "traces", "title": "Add Trace schema for timestamped extracted evidence", "status": "todo", "execution": "github", "priority": "P0", "required": true, "dependsOn": ["IDX-007"], "acceptance": ["Trace supports media_id, type, time range, text/artifact provenance, extractor version, confidence, and metadata."]},
