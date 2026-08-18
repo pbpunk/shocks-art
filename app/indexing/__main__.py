@@ -10,11 +10,15 @@ from sqlalchemy import func, select
 from app.core.config import get_settings
 from app.core.database import Base, SessionLocal, engine
 from app.indexing.embedding_service import index_visual_trace_embeddings
+from app.indexing.evaluation import evaluate_visual_search, load_evaluation_spec
 from app.indexing.qwen_backend import QwenSubprocessEmbeddingBackend
 from app.indexing.qwen_runtime import inspect_qwen_runtime
 from app.indexing.service import VisualExtractionConfig, index_all_visual_media, index_visual_media
 from app.indexing.visual_search import search_visual_embeddings
 from app.library_models import Embedding, IndexRun, Media, Trace  # noqa: F401 - registers indexing tables
+
+
+DEFAULT_VISUAL_EVALUATION_SPEC = Path("config/visual-search-evaluation.json")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -57,6 +61,21 @@ def _parser() -> argparse.ArgumentParser:
     )
     search_parser.add_argument("query")
     search_parser.add_argument("--top-k", type=int, default=10)
+
+    evaluation_parser = subparsers.add_parser(
+        "evaluate-visual",
+        help="Run the blind multi-query/multi-dimension semantic visual evaluation bundle",
+    )
+    evaluation_parser.add_argument(
+        "--spec",
+        default=str(DEFAULT_VISUAL_EVALUATION_SPEC),
+        help="Evaluation query/dimension JSON specification",
+    )
+    evaluation_parser.add_argument(
+        "--output",
+        default=None,
+        help="Optional path to also write the complete JSON result",
+    )
 
     subparsers.add_parser("qwen-status", help="Report the pinned isolated Qwen runtime without loading it")
     subparsers.add_parser("status", help="Print machine-readable indexing table counts")
@@ -139,6 +158,24 @@ def main(argv: list[str] | None = None) -> int:
                     sort_keys=True,
                 )
             )
+            return 0
+
+        if args.command == "evaluate-visual":
+            try:
+                backend = QwenSubprocessEmbeddingBackend()
+                spec = load_evaluation_spec(Path(args.spec))
+                result = evaluate_visual_search(db, backend=backend, spec=spec)
+            except Exception as exc:
+                print(json.dumps({"ok": False, "error": f"{type(exc).__name__}: {exc}"}, indent=2))
+                return 1
+
+            payload = {"ok": True, "evaluation": result}
+            rendered = json.dumps(payload, indent=2, sort_keys=True)
+            if args.output:
+                output_path = Path(args.output)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(rendered + "\n", encoding="utf-8")
+            print(rendered)
             return 0
 
         config = VisualExtractionConfig(sample_interval_seconds=args.interval)
