@@ -1,8 +1,9 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AnalysisRun, CandidateWindow, Stream
+from app.models import AnalysisRun, CandidateWindow, Stream, StreamTranscript
 from app.schemas.candidate import CandidateResponse
+from app.services.candidate_evidence import CandidateEvidenceValidationError, validate_candidate_transcript_evidence
 from app.services.ranking import weighted_score
 from app.services.tags import normalize_tags
 
@@ -74,7 +75,26 @@ def build_candidate(run: AnalysisRun, payload, rank: int) -> CandidateWindow:
     )
 
 
+def _latest_stream_transcript(db: Session, stream_id: str) -> StreamTranscript | None:
+    return db.scalar(
+        select(StreamTranscript)
+        .where(StreamTranscript.stream_id == stream_id)
+        .order_by(StreamTranscript.updated_at.desc(), StreamTranscript.created_at.desc())
+    )
+
+
 def save_candidates(db: Session, run: AnalysisRun, response: CandidateResponse) -> list[CandidateWindow]:
+    transcript = _latest_stream_transcript(db, run.stream_id)
+    try:
+        validate_candidate_transcript_evidence(response, transcript)
+    except CandidateEvidenceValidationError as exc:
+        run.validation_errors = exc.errors
+        run.status = "quarantined"
+        run.stream.processing_status = "quarantined"
+        run.exception_message = "Temporal transcript evidence failed: " + "; ".join(exc.errors[:5])
+        db.flush()
+        raise
+
     candidates = [
         build_candidate(run, payload, rank=index + 1)
         for index, payload in enumerate(response.candidates)
