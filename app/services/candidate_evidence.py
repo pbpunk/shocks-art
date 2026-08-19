@@ -16,9 +16,11 @@ from app.schemas.candidate import CandidateResponse
 
 
 DEFAULT_WINDOW_TOLERANCE_SECONDS = 5
-DEFAULT_EVIDENCE_RADIUS_SECONDS = 8
 MIN_SUPPORT_SCORE = 0.68
 _NO_EVIDENCE_SENTINEL = "no verified in window transcript evidence"
+_MIN_CHUNK_TOKENS = 3
+_MAX_CHUNK_TOKENS = 24
+_CHUNK_STEP_TOKENS = 18
 
 
 class CandidateEvidenceValidationError(ValueError):
@@ -64,6 +66,32 @@ def _normalized(value: str) -> str:
 def _is_no_evidence_excerpt(value: str) -> bool:
     normalized = _normalized(value)
     return not normalized or normalized.startswith(_NO_EVIDENCE_SENTINEL)
+
+
+def _claim_chunks(value: str) -> list[str]:
+    """Break a spoken claim into caption-sized chunks.
+
+    Timed evidence sometimes stores a whole 20-30 second quote at the timestamp where
+    the quote begins. Matching that entire quote against a tiny neighborhood around
+    the first timestamp creates false negatives. Chunking preserves the semantic
+    requirement while allowing a long quote to be proven across the whole candidate.
+    """
+
+    chunks: list[str] = []
+    for clause in re.split(r"[.!?;\n]+", str(value or "")):
+        tokens = _normalize_tokens(clause)
+        if len(tokens) < _MIN_CHUNK_TOKENS:
+            continue
+        if len(tokens) <= _MAX_CHUNK_TOKENS:
+            chunks.append(" ".join(tokens))
+            continue
+        for start in range(0, len(tokens), _CHUNK_STEP_TOKENS):
+            window = tokens[start : start + _MAX_CHUNK_TOKENS]
+            if len(window) >= _MIN_CHUNK_TOKENS:
+                chunks.append(" ".join(window))
+            if start + _MAX_CHUNK_TOKENS >= len(tokens):
+                break
+    return chunks
 
 
 def _support_score(claim: str, context: str) -> float:
@@ -114,39 +142,111 @@ def _evidence_values(evidence) -> tuple[int, str]:
     return int(evidence.seconds), str(evidence.text)
 
 
+def _unsupported_chunks(claim: str, context: str) -> list[tuple[str, float]]:
+    unsupported: list[tuple[str, float]] = []
+    for chunk in _claim_chunks(claim):
+        score = _support_score(chunk, context)
+        if score < MIN_SUPPORT_SCORE:
+            unsupported.append((chunk, score))
+    return unsupported
+
+
+def _candidate_context(
+    candidate,
+    segments: tuple[LanguageSegment, ...],
+    *,
+    window_tolerance_seconds: int,
+) -> str:
+    return _caption_context(
+        segments,
+        start_seconds=int(candidate.start_seconds),
+        end_seconds=int(candidate.end_seconds),
+        tolerance_seconds=window_tolerance_seconds,
+    )
+
+
 def _candidate_issues(
     candidate,
     segments: tuple[LanguageSegment, ...],
     *,
     window_tolerance_seconds: int,
-    evidence_radius_seconds: int,
+    require_timed_evidence: bool,
 ) -> list[str]:
     title = str(candidate.title)
     excerpt = str(candidate.transcript_excerpt or "")
     evidence_items = list(candidate.transcript_evidence or [])
     issues: list[str] = []
 
-    if not _is_no_evidence_excerpt(excerpt) and not evidence_items:
-        issues.append(
-            f"{title}: transcript_excerpt claims spoken evidence but transcript_evidence is empty"
-        )
+    if require_timed_evidence and not _is_no_evidence_excerpt(excerpt) and not evidence_items:
+        issues.append(f"{title}: transcript_excerpt claims spoken evidence but transcript_evidence is empty")
+        return issues
 
+    context = _candidate_context(
+        candidate,
+        segments,
+        window_tolerance_seconds=window_tolerance_seconds,
+    )
     for evidence in evidence_items:
         seconds, text = _evidence_values(evidence)
-        context = _caption_context(
-            segments,
-            start_seconds=max(int(candidate.start_seconds), seconds - evidence_radius_seconds),
-            end_seconds=min(int(candidate.end_seconds), seconds + evidence_radius_seconds),
-            tolerance_seconds=window_tolerance_seconds,
-        )
-        score = _support_score(text, context)
-        if score < MIN_SUPPORT_SCORE:
+        unsupported = _unsupported_chunks(text, context)
+        for chunk, score in unsupported:
             issues.append(
                 f"{title}: transcript_evidence at {seconds}s is not supported by stored captions "
-                f"inside the candidate window (support={score:.3f}): {text[:180]}"
+                f"inside the candidate window (support={score:.3f}): {chunk[:180]}"
             )
-
     return issues
+
+
+def _legacy_excerpt_audit(
+    candidate,
+    segments: tuple[LanguageSegment, ...],
+    *,
+    window_tolerance_seconds: int,
+) -> tuple[str, tuple[str, ...]]:
+    """Audit pre-gate candidates that may have transcript_excerpt but no evidence array.
+
+    Historical direct-Gemini rows predate the evidence-array requirement. Treating all
+    of them as failures only proves that the old format lacked provenance. Instead:
+    - all excerpt chunks supported in-window => pass;
+    - a mixture of supported and unsupported chunks => fail (strong evidence that the
+      candidate combined speech from different source windows);
+    - no lexical support at all => unverifiable, because the excerpt may be a summary
+      rather than a quote.
+    """
+
+    excerpt = str(candidate.transcript_excerpt or "")
+    if _is_no_evidence_excerpt(excerpt):
+        return "pass", ()
+
+    chunks = _claim_chunks(excerpt)
+    if not chunks:
+        return "unverifiable", ("legacy transcript_excerpt has no timed evidence and no auditable spoken chunks",)
+
+    context = _candidate_context(
+        candidate,
+        segments,
+        window_tolerance_seconds=window_tolerance_seconds,
+    )
+    scored = [(chunk, _support_score(chunk, context)) for chunk in chunks]
+    supported = [(chunk, score) for chunk, score in scored if score >= MIN_SUPPORT_SCORE]
+    unsupported = [(chunk, score) for chunk, score in scored if score < MIN_SUPPORT_SCORE]
+
+    if supported and not unsupported:
+        return "pass", ()
+    if supported and unsupported:
+        issues = tuple(
+            f"legacy transcript_excerpt mixes in-window and unsupported speech "
+            f"(support={score:.3f}): {chunk[:180]}"
+            for chunk, score in unsupported
+        )
+        return "fail", issues
+    return (
+        "unverifiable",
+        (
+            "legacy transcript_excerpt has no timed evidence and could not be independently matched "
+            "to stored captions inside the candidate window",
+        ),
+    )
 
 
 def _segments_for_transcript(transcript: StreamTranscript | None) -> tuple[LanguageSegment, ...] | None:
@@ -166,18 +266,17 @@ def validate_candidate_transcript_evidence(
     transcript: StreamTranscript | None,
     *,
     window_tolerance_seconds: int = DEFAULT_WINDOW_TOLERANCE_SECONDS,
-    evidence_radius_seconds: int = DEFAULT_EVIDENCE_RADIUS_SECONDS,
 ) -> CandidateResponse:
-    """Reject transcript-backed candidates whose declared evidence cannot be verified.
+    """Reject new transcript-backed candidates whose declared evidence cannot be verified.
 
-    The schema already guarantees evidence timestamps fall inside the candidate window.
-    This gate adds the missing semantic checks: spoken transcript excerpts require
-    timestamped evidence, and each declared evidence line must be supported by the
-    stored JSON3 captions near that in-window timestamp.
+    The schema guarantees evidence timestamps are inside the candidate window. This
+    gate adds source support: spoken excerpts require timed evidence, and every timed
+    evidence claim must be supported somewhere inside the selected source window.
 
-    When no stored timestamped transcript is available, the gate intentionally does
-    not reject the response. Those candidates remain unverified until another speech
-    evidence source (for example local transcription) exists.
+    Evidence text may span well beyond its starting timestamp, so support is checked
+    against the candidate window rather than an arbitrary few-second radius around the
+    evidence timestamp. When no stored timestamped transcript is available, the gate
+    intentionally does not pretend verification is possible.
     """
 
     segments = _segments_for_transcript(transcript)
@@ -191,7 +290,7 @@ def validate_candidate_transcript_evidence(
                 candidate,
                 segments,
                 window_tolerance_seconds=window_tolerance_seconds,
-                evidence_radius_seconds=evidence_radius_seconds,
+                require_timed_evidence=True,
             )
         )
     if errors:
@@ -204,21 +303,26 @@ def audit_candidate_window(
     transcript: StreamTranscript | None,
     *,
     window_tolerance_seconds: int = DEFAULT_WINDOW_TOLERANCE_SECONDS,
-    evidence_radius_seconds: int = DEFAULT_EVIDENCE_RADIUS_SECONDS,
 ) -> CandidateEvidenceAudit:
     segments = _segments_for_transcript(transcript)
     if segments is None:
         status = "unverifiable"
         issues = ("timestamped raw transcript unavailable",)
-    else:
+    elif candidate.transcript_evidence:
         found = _candidate_issues(
             candidate,
             segments,
             window_tolerance_seconds=window_tolerance_seconds,
-            evidence_radius_seconds=evidence_radius_seconds,
+            require_timed_evidence=False,
         )
         status = "fail" if found else "pass"
         issues = tuple(found)
+    else:
+        status, issues = _legacy_excerpt_audit(
+            candidate,
+            segments,
+            window_tolerance_seconds=window_tolerance_seconds,
+        )
 
     run = candidate.analysis_run
     return CandidateEvidenceAudit(
