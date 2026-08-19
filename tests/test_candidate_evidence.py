@@ -6,6 +6,7 @@ import pytest
 from app.schemas.candidate import CandidateResponse, seconds_to_timestamp
 from app.services.candidate_evidence import (
     CandidateEvidenceValidationError,
+    audit_candidate_window,
     validate_candidate_transcript_evidence,
 )
 
@@ -73,43 +74,45 @@ def _event(seconds, text, duration_ms=3000):
     return {"tStartMs": seconds * 1000, "dDurationMs": duration_ms, "segs": [{"utf8": text}]}
 
 
-def test_known_good_suicidal_depression_candidate_passes_temporal_evidence_gate(tmp_path):
+def _audit_candidate(candidate_payload, *, model="native-youtube-structured-v1"):
+    return SimpleNamespace(
+        candidate_window_id="candidate_fixture",
+        stream_id="stream_fixture",
+        analysis_run_id="run_fixture",
+        analysis_run=SimpleNamespace(model=model, prompt_version="1.0"),
+        **candidate_payload,
+    )
+
+
+def test_known_good_long_quote_passes_when_evidence_timestamp_marks_quote_start(tmp_path):
     transcript = _transcript(
         tmp_path,
         [
-            _event(2876, "honestly, I was suicidal"),
-            _event(2885, "knowing that people gave me money and they needed their art"),
-            _event(2898, "Obviously, I'm still supposed to be here and do this thing"),
+            _event(2870, "this right here you guys it honest to God there was a point where I was honestly I was suicidal"),
+            _event(2883, "what kept me going is knowing that people gave me money and they needed their art"),
+            _event(2893, "every time I'd get close to finishing a piece somebody else would hit me up and order another"),
+            _event(2898, "Obviously I'm still supposed to be here and do this thing"),
         ],
+    )
+    quote = (
+        "this right here, you guys, it it honest to God, there was a point where I was uh honestly, I was suicidal. "
+        "And what kept me going is knowing that people gave me money and they needed their art. "
+        "And what's crazy is every time I'd get close to finishing a piece, somebody else would hit me up and order another. "
+        "Obviously, I'm still supposed to be here and do this thing."
     )
     candidate = _candidate(
         title="Handling Suicidal Depression",
         start=2870,
         end=2900,
-        excerpt=(
-            "honestly, I was suicidal. knowing that people gave me money and they needed their art. "
-            "Obviously, I'm still supposed to be here and do this thing."
-        ),
-        evidence=[
-            {"timestamp": seconds_to_timestamp(2876), "seconds": 2876, "text": "honestly, I was suicidal"},
-            {
-                "timestamp": seconds_to_timestamp(2885),
-                "seconds": 2885,
-                "text": "knowing that people gave me money and they needed their art",
-            },
-            {
-                "timestamp": seconds_to_timestamp(2898),
-                "seconds": 2898,
-                "text": "Obviously, I'm still supposed to be here",
-            },
-        ],
+        excerpt=quote,
+        evidence=[{"timestamp": seconds_to_timestamp(2870), "seconds": 2870, "text": quote}],
     )
 
     response = _response(candidate)
     assert validate_candidate_transcript_evidence(response, transcript) is response
 
 
-def test_known_bad_fractal_burning_candidate_is_rejected_when_excerpt_has_no_timed_evidence(tmp_path):
+def test_new_candidate_with_spoken_excerpt_but_no_timed_evidence_is_rejected(tmp_path):
     transcript = _transcript(
         tmp_path,
         [
@@ -135,10 +138,13 @@ def test_known_bad_fractal_burning_candidate_is_rejected_when_excerpt_has_no_tim
         validate_candidate_transcript_evidence(_response(candidate), transcript)
 
 
-def test_declared_transcript_evidence_must_match_captions_near_its_in_window_timestamp(tmp_path):
+def test_declared_transcript_evidence_must_be_supported_somewhere_inside_candidate_window(tmp_path):
     transcript = _transcript(
         tmp_path,
-        [_event(135, "So I soak them with baking soda and borax to carry the current through the wood")],
+        [
+            _event(135, "So I soak them with baking soda and borax to carry the current through the wood"),
+            _event(403, "This is 10,000 V of electricity, 500 mA"),
+        ],
     )
     candidate = _candidate(
         title="Fractal Burning: The Process and Safety Warning",
@@ -156,6 +162,67 @@ def test_declared_transcript_evidence_must_match_captions_near_its_in_window_tim
 
     with pytest.raises(CandidateEvidenceValidationError, match="not supported by stored captions"):
         validate_candidate_transcript_evidence(_response(candidate), transcript)
+
+
+def test_legacy_candidate_without_timed_evidence_passes_if_entire_excerpt_is_in_window(tmp_path):
+    transcript = _transcript(
+        tmp_path,
+        [
+            _event(2876, "honestly I was suicidal"),
+            _event(2885, "knowing that people gave me money and they needed their art"),
+        ],
+    )
+    payload = _candidate(
+        title="Legacy supported quote",
+        start=2870,
+        end=2900,
+        excerpt="honestly I was suicidal. knowing that people gave me money and they needed their art.",
+        evidence=[],
+    )
+
+    audit = audit_candidate_window(_audit_candidate(payload), transcript)
+    assert audit.status == "pass"
+    assert audit.issues == ()
+
+
+def test_legacy_candidate_without_timed_evidence_fails_when_excerpt_mixes_windows(tmp_path):
+    transcript = _transcript(
+        tmp_path,
+        [
+            _event(135, "So I soak them with baking soda and borax to carry the current through the wood"),
+            _event(403, "This is 10,000 V of electricity, 500 mA"),
+            _event(417, "Don't touch it or you're going to have a bad time and never wake up again"),
+        ],
+    )
+    payload = _candidate(
+        title="Legacy mixed-window quote",
+        start=18,
+        end=360,
+        excerpt=(
+            "So I soak them with baking soda and borax to carry the current through the wood. "
+            "This is 10,000 volts of electricity, 500 milliamps. "
+            "Don't touch it or you're going to have a bad time and never wake up again."
+        ),
+        evidence=[],
+    )
+
+    audit = audit_candidate_window(_audit_candidate(payload, model="gemini-3.1-flash-lite"), transcript)
+    assert audit.status == "fail"
+    assert any("mixes in-window and unsupported speech" in issue for issue in audit.issues)
+
+
+def test_legacy_candidate_without_timed_evidence_is_unverifiable_if_excerpt_is_only_unmatched_summary(tmp_path):
+    transcript = _transcript(tmp_path, [_event(60, "the literal captions say something else here")])
+    payload = _candidate(
+        title="Legacy paraphrase",
+        start=30,
+        end=90,
+        excerpt="Nate generally explains the history of the project and why it matters to him.",
+        evidence=[],
+    )
+
+    audit = audit_candidate_window(_audit_candidate(payload, model="gemini-3.1-flash-lite"), transcript)
+    assert audit.status == "unverifiable"
 
 
 def test_visual_only_candidate_does_not_require_transcript_evidence(tmp_path):
