@@ -19,9 +19,9 @@ Historical AnalysisRun rows and raw responses are never deleted or relabeled as 
 Dry-run is the default and does not call Gemini:
 
 ```powershell
-python tools/reanalyze_stream.py <STREAM_ID> \
-  --expected-candidate-id <CANDIDATE_1> \
-  --expected-candidate-id <CANDIDATE_2> \
+python tools/reanalyze_stream.py <STREAM_ID> `
+  --expected-candidate-id <CANDIDATE_1> `
+  --expected-candidate-id <CANDIDATE_2> `
   --expected-candidate-id <CANDIDATE_3>
 ```
 
@@ -32,11 +32,11 @@ The JSON output includes the active candidate set, blockers, and `safe` status.
 `--apply` requires both the exact expected active candidate set and a reason:
 
 ```powershell
-python tools/reanalyze_stream.py <STREAM_ID> \
-  --expected-candidate-id <CANDIDATE_1> \
-  --expected-candidate-id <CANDIDATE_2> \
-  --expected-candidate-id <CANDIDATE_3> \
-  --reason "temporal evidence cleanup" \
+python tools/reanalyze_stream.py <STREAM_ID> `
+  --expected-candidate-id <CANDIDATE_1> `
+  --expected-candidate-id <CANDIDATE_2> `
+  --expected-candidate-id <CANDIDATE_3> `
+  --reason "temporal evidence cleanup" `
   --apply
 ```
 
