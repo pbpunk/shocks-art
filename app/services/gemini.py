@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.core.config import ROOT_DIR, get_settings
 from app.models import Stream
+from app.services.transient_retry import call_with_transient_gemini_retry
 
 
 EDITORIAL_PROMPT = """You are reviewing an archived Shocks Art livestream as an assistant editor.
@@ -98,31 +99,35 @@ class GeminiAnalyzer:
 
         client = genai.Client(api_key=self.api_key)
         prompt = self.build_analysis_prompt(stream)
-        if hasattr(client, "interactions"):
-            response = client.interactions.create(
-                model=self.model,
-                input=[
-                    {"type": "video", "uri": stream.url},
-                    {"type": "text", "text": prompt},
-                ],
-            )
-            return getattr(response, "output_text", None) or getattr(response, "text", None) or ""
 
-        from google.genai import types
-
-        response = client.models.generate_content(
-            model=self.model,
-            contents=[
-                types.Content(
-                    role="user",
-                    parts=[
-                        types.Part(text=prompt),
-                        types.Part(file_data=types.FileData(file_uri=stream.url, mime_type="video/mp4")),
+        def request() -> str:
+            if hasattr(client, "interactions"):
+                response = client.interactions.create(
+                    model=self.model,
+                    input=[
+                        {"type": "video", "uri": stream.url},
+                        {"type": "text", "text": prompt},
                     ],
                 )
-            ],
-        )
-        return response.text or ""
+                return getattr(response, "output_text", None) or getattr(response, "text", None) or ""
+
+            from google.genai import types
+
+            response = client.models.generate_content(
+                model=self.model,
+                contents=[
+                    types.Content(
+                        role="user",
+                        parts=[
+                            types.Part(text=prompt),
+                            types.Part(file_data=types.FileData(file_uri=stream.url, mime_type="video/mp4")),
+                        ],
+                    )
+                ],
+            )
+            return response.text or ""
+
+        return call_with_transient_gemini_retry(request, retries=get_settings().max_retries)
 
     def build_repair_prompt(self, previous_response: str, validation_errors: list[str]) -> str:
         return REPAIR_PROMPT.format(
@@ -138,11 +143,15 @@ class GeminiAnalyzer:
         from google import genai
 
         client = genai.Client(api_key=self.api_key)
-        response = client.models.generate_content(
-            model=self.model,
-            contents=self.build_repair_prompt(previous_response, validation_errors),
-        )
-        return response.text or ""
+
+        def request() -> str:
+            response = client.models.generate_content(
+                model=self.model,
+                contents=self.build_repair_prompt(previous_response, validation_errors),
+            )
+            return response.text or ""
+
+        return call_with_transient_gemini_retry(request, retries=get_settings().max_retries)
 
 
 def raw_response_path(run_id: str) -> Path:
