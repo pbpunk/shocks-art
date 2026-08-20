@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.models import AnalysisRun, CandidateWindow, Stream, StreamTranscript
 from app.schemas.candidate import CandidateResponse
 from app.services.candidate_evidence import CandidateEvidenceValidationError, validate_candidate_transcript_evidence
+from app.services.candidate_grounding import ground_missing_transcript_evidence
 from app.services.ranking import weighted_score
 from app.services.tags import normalize_tags
 
@@ -86,6 +87,7 @@ def _latest_stream_transcript(db: Session, stream_id: str) -> StreamTranscript |
 def save_candidates(db: Session, run: AnalysisRun, response: CandidateResponse) -> list[CandidateWindow]:
     transcript = _latest_stream_transcript(db, run.stream_id)
     try:
+        ground_missing_transcript_evidence(response, transcript)
         validate_candidate_transcript_evidence(response, transcript)
     except CandidateEvidenceValidationError as exc:
         run.validation_errors = exc.errors
