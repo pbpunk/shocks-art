@@ -2,16 +2,29 @@
 
 Direct Gemini candidate analysis can describe a real spoken moment while assigning it to the wrong source window. Schema validation alone cannot catch that: internally consistent start/end fields can still be semantically wrong.
 
-Before `save_candidates` persists a new direct-analysis response, the application now checks the latest stored timestamped `StreamTranscript` when one is available:
+Before `save_candidates` persists a new direct-analysis response, the application now uses the latest stored timestamped `StreamTranscript` when one is available.
+
+The production path has two separate stages:
+
+1. **caption grounding** for missing bookkeeping;
+2. **strict temporal validation** for all resulting evidence.
+
+If Gemini returns a spoken `transcript_excerpt` but leaves `transcript_evidence` empty, the grounding stage may fill the evidence array automatically, but only when every auditable excerpt chunk can be matched to stored JSON3 captions whose timestamps begin inside the selected candidate window. Generated evidence text is copied from the stored captions and uses the matching caption timestamp. Grounded rows record `_transcript_evidence_grounding.version = caption-grounding-v1` in `emergent_observations`.
+
+Grounding is not a fallback that accepts unsupported speech. If any claimed excerpt chunk cannot be located inside the selected window, the candidate is rejected before persistence.
+
+The validator then enforces:
 
 - a non-empty spoken `transcript_excerpt` must have timestamped `transcript_evidence`;
 - the schema already requires every evidence timestamp to be inside the candidate window;
-- each declared transcript-evidence claim must be supported by stored JSON3 caption text somewhere inside the selected candidate window (plus a small boundary tolerance);
+- each transcript-evidence claim must be supported by stored JSON3 caption text somewhere inside the selected candidate window (plus a small boundary tolerance for validation);
 - long evidence quotes are split into caption-sized chunks, so an evidence timestamp may mark the beginning of a quote that legitimately spans much of the selected window;
 - visual-only candidates can use `No verified in-window transcript evidence` and are not rejected for lacking speech evidence;
 - when no timestamped raw transcript exists, this gate does not pretend verification is possible. Local transcription can fill that gap later.
 
-A temporal evidence failure occurs before any `CandidateWindow` rows are added. The owning `AnalysisRun` and `Stream` are quarantined. Unlike schema-format errors, this failure does not go through the text-only Gemini repair path because that repair request does not have source video access and therefore cannot safely invent corrected timestamps.
+A temporal evidence failure occurs before any `CandidateWindow` rows are added. The owning `AnalysisRun` and `Stream` are quarantined. Unsupported speech does not go through the text-only Gemini repair path because that repair request does not have source video access and therefore cannot safely invent corrected timestamps.
+
+The direct validator remains intentionally strict: if called on an ungrounded response containing spoken excerpt text and an empty evidence array, it rejects that response. Caption grounding is an explicit pipeline stage rather than a relaxation of validator semantics.
 
 ## Historical audit semantics
 
@@ -23,7 +36,7 @@ For those rows, the audit uses the stored `transcript_excerpt` itself:
 - if some excerpt chunks are supported in-window and other chunks are not, the row fails because that is strong evidence that multiple source windows were combined;
 - if none of the excerpt can be matched lexically, the row is `unverifiable` rather than failed because the old field may contain a paraphrase instead of a quotation.
 
-This distinction is only for auditing historical rows. New direct-analysis responses remain subject to the stricter timed-evidence requirement before persistence.
+This distinction is only for auditing historical rows. New direct-analysis responses remain subject to source-backed grounding plus strict timed-evidence validation before persistence.
 
 ## Read-only audit
 
