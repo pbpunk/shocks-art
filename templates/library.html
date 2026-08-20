@@ -1,135 +1,103 @@
 {% extends "base.html" %}
 
 {% block content %}
-<link rel="stylesheet" href="{{ url_path(request, '/static/library.css?v=semantic-search-1') }}">
-<section class="panel">
-  <div class="section-heading">
-    <div>
-      <p class="eyebrow">Library</p>
-      <h1>Media memory</h1>
-      <p class="muted">Search indexed visual evidence by meaning, or filter the source catalog by filename/title.</p>
+<link rel="stylesheet" href="{{ url_path(request, '/static/library.css?v=photo-wall-1') }}">
+<section class="library-page">
+  <header class="library-topbar">
+    <div class="library-heading">
+      <h1>Library</h1>
+      <div class="library-counts" aria-label="Library summary">
+        <span><strong>{{ media_count }}</strong> media</span>
+        <span><strong>{{ video_count }}</strong> video</span>
+        <span><strong>{{ image_count }}</strong> images</span>
+        <span><strong>{{ inbox_file_count }}</strong> inbox</span>
+      </div>
     </div>
-    <form method="post" action="{{ url_path(request, '/actions/library/ingest') }}">
-      <button type="submit">Scan inbox</button>
-    </form>
-  </div>
+    <div class="library-actions">
+      <form method="post" action="{{ url_path(request, '/actions/library/ingest') }}">
+        <button class="compact-button" type="submit">Scan inbox</button>
+      </form>
+      <details class="library-tools">
+        <summary class="button secondary compact-button">Tools</summary>
+        <div class="library-tools-panel">
+          <div class="tool-row">
+            <span class="muted">Local ingest</span>
+            <code>{{ ingest_path }}</code>
+          </div>
+          <a href="{{ url_path(request, '/api/library/media') }}">JSON inventory</a>
+          <p class="muted">Drop media into the ingest folder, then scan. Re-scans are safe.</p>
+        </div>
+      </details>
+    </div>
+  </header>
 
   {% if ingest_message %}
-    <div class="notice {{ ingest_status }}">
-      {{ ingest_message }}
-    </div>
+    <div class="notice compact-notice {{ ingest_status }}">{{ ingest_message }}</div>
   {% endif %}
 
-  <div class="stats-grid">
-    <article class="stat-card">
-      <span class="stat-label">Media</span>
-      <strong>{{ media_count }}</strong>
-      <span class="muted">Indexed source records</span>
-    </article>
-    <article class="stat-card">
-      <span class="stat-label">Video</span>
-      <strong>{{ video_count }}</strong>
-      <span class="muted">Video sources</span>
-    </article>
-    <article class="stat-card">
-      <span class="stat-label">Images</span>
-      <strong>{{ image_count }}</strong>
-      <span class="muted">Still-image sources</span>
-    </article>
-    <article class="stat-card">
-      <span class="stat-label">Inbox</span>
-      <strong>{{ inbox_file_count }}</strong>
-      <span class="muted">Supported files currently on disk</span>
-    </article>
-  </div>
-
-  <section class="semantic-search-panel" aria-labelledby="semantic-search-heading">
-    <div class="section-heading compact-heading">
-      <div>
-        <p class="eyebrow">Visual semantic search</p>
-        <h2 id="semantic-search-heading">Find what is in the footage</h2>
-        <p class="muted">The query is embedded with the isolated Qwen runtime and compared only with persisted visual vectors. Filenames and titles are display metadata, not scoring inputs.</p>
-      </div>
-    </div>
-
-    <form id="semantic-search-form" class="semantic-search-form">
-      <label class="grow" for="semantic-query">
-        <span>Describe what you want to find</span>
-        <input id="semantic-query" type="search" autocomplete="off" placeholder="man playing guitar" maxlength="500" required>
-      </label>
-      <button id="semantic-search-button" type="submit">Search visuals</button>
-    </form>
-
-    <div id="semantic-search-status" class="semantic-search-status muted" aria-live="polite">Search is read-only. The first prototype query can take about 15 seconds while the isolated model starts.</div>
-    <div id="semantic-search-results" class="semantic-results" hidden></div>
-  </section>
-
-  <section class="panel inset-panel">
-    <div class="section-heading">
-      <div>
-        <h2>Local ingest</h2>
-        <p class="muted"><code>{{ ingest_path }}</code></p>
-      </div>
-      <div>
-        <span class="muted">Drop media here, then Scan inbox. Re-scans are safe.</span><br>
-        <a href="{{ url_path(request, '/api/library/media') }}">JSON inventory</a>
-      </div>
-    </div>
-  </section>
-
-  <form method="get" action="{{ url_path(request, '/library') }}" class="filter-row">
-    <label class="grow">
-      <span>Catalog filter</span>
-      <input type="search" name="q" value="{{ query }}" placeholder="Filter titles or filenames">
-    </label>
-    <button type="submit">Filter</button>
-    {% if query %}<a class="button secondary" href="{{ url_path(request, '/library') }}">Clear</a>{% endif %}
+  <form id="semantic-search-form" class="semantic-search-form" aria-label="Visual semantic search">
+    <input id="semantic-query" type="search" autocomplete="off" aria-label="Describe what you want to find" placeholder="Search what is in the footage…" maxlength="500" required>
+    <button id="semantic-search-button" type="submit">Search</button>
   </form>
 
-  {% if media_items %}
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Type</th>
-            <th>Media</th>
-            <th>Duration</th>
-            <th>Dimensions</th>
-            <th>Size</th>
-            <th>Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for media in media_items %}
-            <tr>
-              <td>{{ media.media_kind|upper }}</td>
-              <td>
-                <strong>{{ media.title or media.filename }}</strong><br>
-                <span class="muted">{{ media.filename }}</span>
-              </td>
-              <td>
-                {% if media.duration_seconds is not none %}
-                  {{ "%.1f"|format(media.duration_seconds) }}s
-                {% else %}
-                  —
-                {% endif %}
-              </td>
-              <td>{% if media.width and media.height %}{{ media.width }}×{{ media.height }}{% else %}—{% endif %}</td>
-              <td>{{ "%.1f"|format(media.size_bytes / 1048576) }} MB</td>
-              <td><span class="status {{ media.processing_status }}">{{ media.processing_status }}</span></td>
-            </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  {% else %}
-    <div class="empty-state">
-      <h2>No Media yet</h2>
-      <p class="muted">Put images or videos in <code>{{ ingest_path }}</code> and press <strong>Scan inbox</strong>.</p>
-    </div>
-  {% endif %}
+  <div id="semantic-search-status" class="semantic-search-status muted" aria-live="polite" hidden></div>
+  <div id="semantic-search-results" class="semantic-results" hidden></div>
 
-  <p class="muted">Catalog filtering above is filename/title based and stays separate from semantic scoring.</p>
+  <details class="catalog-drawer" {% if query %}open{% endif %}>
+    <summary>
+      Catalog{% if query %} · filtered “{{ query }}”{% endif %}
+      <span class="muted">{{ media_items|length }} shown</span>
+    </summary>
+    <div class="catalog-drawer-content">
+      <form method="get" action="{{ url_path(request, '/library') }}" class="filter-row">
+        <input type="search" name="q" value="{{ query }}" aria-label="Filter catalog titles or filenames" placeholder="Filter titles or filenames">
+        <button type="submit">Filter</button>
+        {% if query %}<a class="button secondary" href="{{ url_path(request, '/library') }}">Clear</a>{% endif %}
+      </form>
+
+      {% if media_items %}
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Media</th>
+                <th>Duration</th>
+                <th>Dimensions</th>
+                <th>Size</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for media in media_items %}
+                <tr>
+                  <td>{{ media.media_kind|upper }}</td>
+                  <td>
+                    <strong>{{ media.title or media.filename }}</strong><br>
+                    <span class="muted">{{ media.filename }}</span>
+                  </td>
+                  <td>
+                    {% if media.duration_seconds is not none %}
+                      {{ "%.1f"|format(media.duration_seconds) }}s
+                    {% else %}
+                      —
+                    {% endif %}
+                  </td>
+                  <td>{% if media.width and media.height %}{{ media.width }}×{{ media.height }}{% else %}—{% endif %}</td>
+                  <td>{{ "%.1f"|format(media.size_bytes / 1048576) }} MB</td>
+                  <td><span class="status {{ media.processing_status }}">{{ media.processing_status }}</span></td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="empty-state compact-empty">
+          <p class="muted">No media matches this catalog filter.</p>
+        </div>
+      {% endif %}
+    </div>
+  </details>
 </section>
 
 <script>
@@ -152,59 +120,37 @@
     link.href = match.thumbnailUrl;
     link.target = '_blank';
     link.rel = 'noopener';
+    link.title = `${match.title || match.filename || match.mediaId}\n${match.timestampLabel}\nscore ${Number(match.score).toFixed(4)}\ntrace ${match.traceId}`;
 
     const image = document.createElement('img');
     image.src = match.thumbnailUrl;
     image.alt = `Visual match ${rank}: ${match.title || match.filename || 'media'}`;
     image.loading = 'lazy';
-    link.appendChild(image);
 
-    const body = document.createElement('div');
-    body.className = 'semantic-result-body';
-
-    const meta = document.createElement('div');
-    meta.className = 'semantic-result-meta';
+    const topMeta = document.createElement('div');
+    topMeta.className = 'semantic-result-topmeta';
 
     const rankLabel = document.createElement('span');
     rankLabel.className = 'semantic-rank';
     rankLabel.textContent = `#${rank}`;
 
-    const score = document.createElement('strong');
-    score.textContent = `score ${Number(match.score).toFixed(4)}`;
-    meta.append(rankLabel, score);
+    const score = document.createElement('span');
+    score.className = 'semantic-score';
+    score.textContent = Number(match.score).toFixed(3);
+    topMeta.append(rankLabel, score);
 
-    const title = document.createElement('h3');
+    const overlay = document.createElement('div');
+    overlay.className = 'semantic-result-overlay';
+
+    const title = document.createElement('strong');
     title.textContent = match.title || match.filename || match.mediaId;
 
-    const subtitle = document.createElement('p');
-    subtitle.className = 'muted semantic-result-subtitle';
-    subtitle.textContent = `${match.timestampLabel} · ${match.filename || match.kind || ''}`;
+    const subtitle = document.createElement('span');
+    subtitle.textContent = match.timestampLabel || match.kind || '';
 
-    const details = document.createElement('details');
-    details.className = 'semantic-provenance';
-    const summary = document.createElement('summary');
-    summary.textContent = 'Evidence / provenance';
-    const provenance = document.createElement('div');
-    provenance.className = 'semantic-provenance-grid';
-    const fields = [
-      ['Trace', match.traceId],
-      ['Media', match.mediaId],
-      ['Extractor', `${match.provenance?.traceExtractor || 'unknown'} ${match.provenance?.traceExtractorVersion || ''}`.trim()],
-      ['Trace config', match.provenance?.traceConfigurationHash || 'unknown'],
-      ['Embedding', match.provenance?.embeddingGeneration || 'unknown'],
-      ['Dimension', String(match.provenance?.embeddingDimension || '')],
-    ];
-    for (const [label, value] of fields) {
-      const key = document.createElement('span');
-      key.className = 'muted';
-      key.textContent = label;
-      const val = document.createElement('code');
-      val.textContent = value;
-      provenance.append(key, val);
-    }
-    details.append(summary, provenance);
-    body.append(meta, title, subtitle, details);
-    card.append(link, body);
+    overlay.append(title, subtitle);
+    link.append(image, topMeta, overlay);
+    card.append(link);
     return card;
   }
 
@@ -216,13 +162,14 @@
     button.disabled = true;
     results.hidden = true;
     results.replaceChildren();
-    status.textContent = 'Starting isolated Qwen runtime and searching visual evidence…';
+    status.hidden = false;
+    status.textContent = 'Searching visual evidence…';
 
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({query, top_k: 10}),
+        body: JSON.stringify({query, top_k: 30}),
       });
       const payload = await response.json();
       if (!response.ok) {
@@ -230,13 +177,13 @@
       }
 
       const search = payload.result || {};
-      status.textContent = `${search.returned || 0} matches from ${search.vectorCount || 0} vectors · query embedding ${milliseconds(payload.queryEmbeddingMs)} · SQLite + scoring ${milliseconds(search.elapsedMs)}`;
+      status.textContent = `${search.returned || 0} matches · ${milliseconds(payload.queryEmbeddingMs)} embedding · ${milliseconds(search.elapsedMs)} scoring`;
       results.hidden = false;
 
       if (!search.matches?.length) {
         const empty = document.createElement('p');
-        empty.className = 'muted';
-        empty.textContent = 'No visual embeddings matched this generation.';
+        empty.className = 'muted photo-wall-empty';
+        empty.textContent = 'No visual matches.';
         results.appendChild(empty);
         return;
       }
