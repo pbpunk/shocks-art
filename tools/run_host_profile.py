@@ -19,6 +19,16 @@ PROFILE_SCRIPTS = {
     "repo-tests": ROOT / "tools" / "host_profiles" / "repo_tests.py",
 }
 
+# Fixed repository-owned budgets prevent a wedged profile from monopolizing the
+# single workstation verifier until the broad worker timeout expires. The Sheet
+# cannot alter these values.
+PROFILE_TIMEOUT_SECONDS = {
+    "repo-tests": 900,
+    "private-youtube-probe": 900,
+    "indexer-soak": 1800,
+    "whisper-benchmark": 7200,
+}
+
 
 def main() -> int:
     if len(sys.argv) != 2:
@@ -29,11 +39,16 @@ def main() -> int:
     python = sys.executable
     if profile == "whisper-benchmark" and os.getenv("SHOCKS_WHISPER_PYTHON", "").strip():
         python = os.environ["SHOCKS_WHISPER_PYTHON"].strip()
-    result = subprocess.run(
-        [python, str(script)], cwd=ROOT, env=os.environ.copy(), text=True,
-        capture_output=True, check=False,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
+    timeout = PROFILE_TIMEOUT_SECONDS[profile]
+    try:
+        result = subprocess.run(
+            [python, str(script)], cwd=ROOT, env=os.environ.copy(), text=True,
+            capture_output=True, check=False, timeout=timeout,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        print(json.dumps({"summary": f"{profile} exceeded its fixed {timeout}-second execution budget", "timed_out": True, "timeout_seconds": timeout}))
+        return 124
     if result.stderr:
         print(result.stderr, file=sys.stderr, end="")
     if result.stdout:
