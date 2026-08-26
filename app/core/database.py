@@ -35,11 +35,13 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 def init_db() -> None:
     from app import library_models, models  # noqa: F401
     from app.clip_routes import register_clip_routes
+    from app.indexing.control_routes import register_indexing_control_routes
     from app.library_routes import register_library_routes
 
     Base.metadata.create_all(bind=engine)
     _ensure_sqlite_columns()
     register_library_routes()
+    register_indexing_control_routes()
     register_clip_routes()
 
 

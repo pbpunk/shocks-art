@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="library-page">
+  <header class="library-topbar">
+    <div class="library-heading">
+      <h1>Library Indexing</h1>
+      <p class="muted">Queue and inspect offline indexing work. Heavy inference runs in the separate singleton worker, never in this request.</p>
+    </div>
+    <div class="library-actions">
+      <a class="button secondary compact-button" href="{{ url_path(request, '/library') }}">Back to Library</a>
+    </div>
+  </header>
+
+  <div class="panel">
+    <h2>Queue work</h2>
+    <div class="button-row">
+      <button type="button" data-index-job="visual-pending">Index pending visuals</button>
+      <button type="button" data-index-job="visual-embeddings">Index missing embeddings</button>
+      <button type="button" data-index-job="sync-stream-media">Sync stream media + language</button>
+    </div>
+    <p id="indexing-action-status" class="muted" aria-live="polite"></p>
+  </div>
+
+  <div class="panel">
+    <div class="library-heading">
+      <h2>Worker + jobs</h2>
+      <button id="refresh-indexing-jobs" class="button secondary compact-button" type="button">Refresh</button>
+    </div>
+    <pre id="indexing-worker-status" class="muted">Loading worker state…</pre>
+    <div id="indexing-jobs"></div>
+  </div>
+</section>
+
+<script>
+(() => {
+  const jobsEndpoint = {{ url_path(request, '/api/library/indexing/jobs')|tojson }};
+  const jobsNode = document.getElementById('indexing-jobs');
+  const workerNode = document.getElementById('indexing-worker-status');
+  const actionStatus = document.getElementById('indexing-action-status');
+
+  async function request(url, options = {}) {
+    const response = await fetch(url, options);
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+    return payload;
+  }
+
+  function renderJob(job) {
+    const article = document.createElement('article');
+    article.className = 'panel compact-notice';
+
+    const title = document.createElement('strong');
+    title.textContent = `${job.jobType} · ${job.status}`;
+    article.appendChild(title);
+
+    const meta = document.createElement('p');
+    meta.className = 'muted';
+    meta.textContent = `${job.jobId} · attempts ${job.attemptCount}/${job.maxAttempts}`;
+    article.appendChild(meta);
+
+    if (job.progress && Object.keys(job.progress).length) {
+      const progress = document.createElement('pre');
+      progress.textContent = JSON.stringify(job.progress, null, 2);
+      article.appendChild(progress);
+    }
+    if (job.error) {
+      const error = document.createElement('p');
+      error.textContent = job.error;
+      article.appendChild(error);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'button-row';
+    if (job.status === 'queued') {
+      const cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'button secondary compact-button';
+      cancel.textContent = 'Cancel';
+      cancel.addEventListener('click', () => mutateJob(job.jobId, 'cancel'));
+      actions.appendChild(cancel);
+    }
+    if (job.status === 'failed' || job.status === 'cancelled') {
+      const retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'button secondary compact-button';
+      retry.textContent = 'Retry';
+      retry.addEventListener('click', () => mutateJob(job.jobId, 'retry'));
+      actions.appendChild(retry);
+    }
+    article.appendChild(actions);
+    return article;
+  }
+
+  async function refresh() {
+    try {
+      const payload = await request(jobsEndpoint);
+      const worker = payload.snapshot.worker;
+      const counts = payload.snapshot.counts || {};
+      workerNode.textContent = worker
+        ? `Worker ${worker.owner_id} · heartbeat ${worker.heartbeat_at} · lease ${worker.lease_expires_at}\n${JSON.stringify(counts)}`
+        : `Worker not currently leased\n${JSON.stringify(counts)}`;
+      jobsNode.replaceChildren(...payload.jobs.map(renderJob));
+      if (!payload.jobs.length) jobsNode.textContent = 'No indexing jobs yet.';
+    } catch (error) {
+      workerNode.textContent = `Unable to read queue: ${error.message}`;
+    }
+  }
+
+  async function enqueue(jobType) {
+    actionStatus.textContent = `Queueing ${jobType}…`;
+    try {
+      await request(jobsEndpoint, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({job_type: jobType}),
+      });
+      actionStatus.textContent = `${jobType} queued.`;
+      await refresh();
+    } catch (error) {
+      actionStatus.textContent = `Queue failed: ${error.message}`;
+    }
+  }
+
+  async function mutateJob(jobId, action) {
+    actionStatus.textContent = `${action} ${jobId}…`;
+    try {
+      await request(`${jobsEndpoint}/${encodeURIComponent(jobId)}/${action}`, {method: 'POST'});
+      actionStatus.textContent = `${jobId} ${action} accepted.`;
+      await refresh();
+    } catch (error) {
+      actionStatus.textContent = `${action} failed: ${error.message}`;
+    }
+  }
+
+  document.querySelectorAll('[data-index-job]').forEach((button) => {
+    button.addEventListener('click', () => enqueue(button.dataset.indexJob));
+  });
+  document.getElementById('refresh-indexing-jobs').addEventListener('click', refresh);
+  refresh();
+})();
+</script>
+{% endblock %}
