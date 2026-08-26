@@ -14,6 +14,17 @@ function Import-ShocksHostEnvironment {
     }
 }
 
+function Test-PythonRuntime {
+    param([string]$FilePath, [string[]]$PrefixArgs)
+    try {
+        $ProbeArgs = @($PrefixArgs) + @("-c", "import sys; raise SystemExit(0 if sys.version_info >= (3,11) else 1)")
+        & $FilePath @ProbeArgs *> $null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    }
+}
+
 function Test-BridgePython {
     param([string]$FilePath, [string[]]$PrefixArgs)
     try {
@@ -25,7 +36,7 @@ function Test-BridgePython {
     }
 }
 
-function Get-PythonLaunch {
+function Get-PythonCandidates {
     $Candidates = @()
     $VenvPython = Join-Path $ProjectDir ".venv\Scripts\python.exe"
     if (Test-Path -LiteralPath $VenvPython) { $Candidates += @{ FilePath = $VenvPython; PrefixArgs = @() } }
@@ -34,10 +45,53 @@ function Get-PythonLaunch {
         $Candidates += @{ FilePath = "py"; PrefixArgs = @("-3") }
     }
     if (Get-Command python -ErrorAction SilentlyContinue) { $Candidates += @{ FilePath = "python"; PrefixArgs = @() } }
+    return $Candidates
+}
+
+function Get-BridgePython {
+    $Candidates = @(Get-PythonCandidates)
     foreach ($Candidate in $Candidates) {
-        if (Test-BridgePython -FilePath $Candidate.FilePath -PrefixArgs $Candidate.PrefixArgs) { return $Candidate }
+        if ((Test-PythonRuntime -FilePath $Candidate.FilePath -PrefixArgs $Candidate.PrefixArgs) -and
+            (Test-BridgePython -FilePath $Candidate.FilePath -PrefixArgs $Candidate.PrefixArgs)) {
+            return $Candidate
+        }
     }
-    throw "No Python runtime with google-auth and google-api-python-client is available for the Shock's Art GPT Bridge workers."
+
+    $BasePython = $null
+    foreach ($Candidate in $Candidates) {
+        if (Test-PythonRuntime -FilePath $Candidate.FilePath -PrefixArgs $Candidate.PrefixArgs) {
+            $BasePython = $Candidate
+            break
+        }
+    }
+    if (-not $BasePython) {
+        throw "No Python 3.11+ runtime is available to bootstrap the Shock's Art GPT Bridge."
+    }
+
+    $BridgeVenv = Join-Path $DataDir "google_bridge_venv"
+    $BridgePython = Join-Path $BridgeVenv "Scripts\python.exe"
+    if (-not (Test-Path -LiteralPath $BridgePython)) {
+        Write-Host "Creating managed Google bridge Python environment..."
+        $VenvArgs = @($BasePython.PrefixArgs) + @("-m", "venv", $BridgeVenv)
+        & $BasePython.FilePath @VenvArgs
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $BridgePython)) {
+            throw "Could not create managed Google bridge Python environment at $BridgeVenv."
+        }
+    }
+
+    if (-not (Test-BridgePython -FilePath $BridgePython -PrefixArgs @())) {
+        Write-Host "Installing Google bridge dependencies into the managed environment..."
+        & $BridgePython -m pip install --disable-pip-version-check --quiet `
+            "google-auth>=2.32,<3" "google-api-python-client>=2.137,<3"
+        if ($LASTEXITCODE -ne 0) {
+            throw "Could not install Google bridge dependencies into $BridgeVenv."
+        }
+    }
+
+    if (-not (Test-BridgePython -FilePath $BridgePython -PrefixArgs @())) {
+        throw "Managed Google bridge Python environment is missing required Google libraries after installation."
+    }
+    return @{ FilePath = $BridgePython; PrefixArgs = @() }
 }
 
 function Start-BridgeWorker {
@@ -86,7 +140,7 @@ if ($env:PYTHONPATH) { $env:PYTHONPATH = "$ProjectDir;$($env:PYTHONPATH)" }
 else { $env:PYTHONPATH = $ProjectDir }
 
 New-Item -ItemType Directory -Force -Path $DataDir, $LogsDir | Out-Null
-$Python = Get-PythonLaunch
+$Python = Get-BridgePython
 
 try {
     Start-BridgeWorker -Python $Python -ScriptName "google_host_worker.py" -ProcessLabel "Google host verifier" `
