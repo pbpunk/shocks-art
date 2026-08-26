@@ -17,6 +17,7 @@ $HealthUrl = if ($Manifest.health.url) { [string]$Manifest.health.url } else { "
 $StartupTimeoutSeconds = if ($Manifest.health.startupTimeoutSeconds) { [int]$Manifest.health.startupTimeoutSeconds } else { 45 }
 $RuntimeRelativePath = if ($Manifest.runtime.file) { [string]$Manifest.runtime.file } else { "data/runtime.json" }
 $LogsRelativePath = if ($Manifest.runtime.logsDir) { [string]$Manifest.runtime.logsDir } else { "data/logs" }
+$DataDir = Join-Path $ProjectDir "data"
 $RuntimePath = Join-Path $ProjectDir $RuntimeRelativePath
 $LogsDir = Join-Path $ProjectDir $LogsRelativePath
 $PublicBaseUrl = "https://desktop.tail27cee7.ts.net"
