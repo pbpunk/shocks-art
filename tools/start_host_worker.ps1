@@ -13,12 +13,38 @@ function Import-ShocksHostEnvironment {
         [Environment]::SetEnvironmentVariable($Name, $Parts[1].Trim().Trim('"').Trim("'"), "Process")
     }
 }
+
+function Test-HostWorkerPython {
+    param([string]$FilePath, [string[]]$PrefixArgs)
+    try {
+        $ProbeArgs = @($PrefixArgs) + @("-c", "import google.oauth2, googleapiclient.discovery")
+        & $FilePath @ProbeArgs *> $null
+        return $LASTEXITCODE -eq 0
+    } catch {
+        return $false
+    }
+}
+
 function Get-PythonLaunch {
+    $Candidates = @()
     $VenvPython = Join-Path $ProjectDir ".venv\Scripts\python.exe"
-    if (Test-Path -LiteralPath $VenvPython) { return @{ FilePath = $VenvPython; PrefixArgs = @() } }
-    if (Get-Command py -ErrorAction SilentlyContinue) { return @{ FilePath = "py"; PrefixArgs = @("-3") } }
-    if (Get-Command python -ErrorAction SilentlyContinue) { return @{ FilePath = "python"; PrefixArgs = @() } }
-    throw "No usable Python launcher found for Google host worker."
+    if (Test-Path -LiteralPath $VenvPython) {
+        $Candidates += @{ FilePath = $VenvPython; PrefixArgs = @() }
+    }
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        $Candidates += @{ FilePath = "py"; PrefixArgs = @("-3.13") }
+        $Candidates += @{ FilePath = "py"; PrefixArgs = @("-3") }
+    }
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        $Candidates += @{ FilePath = "python"; PrefixArgs = @() }
+    }
+
+    foreach ($Candidate in $Candidates) {
+        if (Test-HostWorkerPython -FilePath $Candidate.FilePath -PrefixArgs $Candidate.PrefixArgs) {
+            return $Candidate
+        }
+    }
+    throw "No Python runtime with google-auth and google-api-python-client is available for the Google host worker."
 }
 
 Import-ShocksHostEnvironment
