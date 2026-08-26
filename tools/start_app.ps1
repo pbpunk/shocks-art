@@ -110,12 +110,6 @@ try {
 }
 
 $AppUrl = "$PublicBaseUrl$Route/"
-try {
-    Start-Process $AppUrl
-} catch {
-    Write-Warning "Could not open $AppUrl automatically: $($_.Exception.Message)"
-}
-
 Write-Host "Ready: $AppUrl"
 Write-Host "Health: $HealthUrl"
 Write-Host "Tailscale upstream: $($Network.Target)"
