@@ -37,27 +37,33 @@ Before launch the worker:
 
 The detached helper repeats the same preflight immediately before invoking the canonical updater.
 
-## Restart survival
+## Bootstrap and restart survival
 
-The update worker launches `tools/google_update_helper.py` as a detached Windows process. `Update App.cmd` is allowed to stop the web app and both bridge workers. The helper survives that stop, waits for the canonical updater to finish, writes an ignored durable receipt under `data/google_update_receipts/`, and best-effort publishes the receipt to Google.
+The update lane deliberately uses Node built-ins rather than Python Google client libraries. `tools/google_update_worker.mjs`, `tools/google_update_helper.mjs`, and `tools/google_update_common.mjs` use Node's built-in crypto/fetch support with the pinned service-account credential file. This keeps the rescue/deployment path independent of the verifier's Python runtime and packages.
+
+`tools/start_host_worker.ps1` starts the dependency-free update worker first. Host verification is started independently afterward, so verifier or Python failures cannot prevent future exact-main repairs from being deployed.
+
+The update worker launches `tools/google_update_helper.mjs` as a detached Windows process. `Update App.cmd` may stop the web app and both bridge workers while the helper survives that stop. The helper waits for the canonical updater to finish, writes an ignored durable receipt under `data/google_update_receipts/`, and best-effort publishes the receipt to Google.
 
 When the updated app starts, `tools/start_host_worker.ps1` starts both:
 
-- `google_host_worker.py` for host verification;
-- `google_update_worker.py` for exact-main updates.
+- `google_update_worker.mjs` for exact-main updates;
+- `google_host_worker.py` for host verification.
 
-The restarted update worker reconciles any durable helper receipt that was produced while the old worker was stopped.
+The restarted updater reconciles durable helper receipts after restart.
+
+The shared JARVIS contract defines `$DataDir` as the repository `data` directory. A regression test guards this bootstrap requirement because bridge PID files, status files, receipts, and the managed verifier environment all depend on that path existing deterministically.
 
 ## State visibility
 
-`State!A:F` remains the host-verifier heartbeat. `State!G:J` is the autonomous-updater heartbeat:
+`State!A:F` is the host-verifier heartbeat. `State!G:J` is the autonomous-updater heartbeat:
 
 - `update_updated_at`
 - `update_status`
 - `update_last_request_id`
 - `update_last_error`
 
-This makes a failed bootstrap remotely diagnosable without opening workstation log files.
+This makes normal worker state visible remotely through the Sheet. Startup failures that occur before either worker launches are surfaced by the JARVIS start command.
 
 ## Exactness
 
