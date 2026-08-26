@@ -1,5 +1,7 @@
 . (Join-Path $PSScriptRoot "app_contract.ps1")
 
+$DefaultSpreadsheetId = "1hD8IqH_o1RJnVyxpAuhSmR-nB6DNwvK51xZIyn8IX_I"
+
 function Import-ShocksHostEnvironment {
     $EnvPath = Join-Path $ProjectDir ".env"
     if (-not (Test-Path -LiteralPath $EnvPath)) { return }
@@ -20,7 +22,10 @@ function Get-PythonLaunch {
 }
 
 Import-ShocksHostEnvironment
-if (-not $env:SHOCKS_GOOGLE_SPREADSHEET_ID) { Write-Host "Shock's Art GPT Bridge is not configured; host worker remains disabled."; exit 0 }
+if (-not $env:SHOCKS_GOOGLE_SPREADSHEET_ID) {
+    $env:SHOCKS_GOOGLE_SPREADSHEET_ID = $DefaultSpreadsheetId
+    Write-Host "Using repository-pinned Shock's Art GPT Bridge spreadsheet $DefaultSpreadsheetId."
+}
 $PidPath = Join-Path $DataDir "google_host_worker.pid"; $StatusPath = Join-Path $DataDir "google_host_worker_status.json"
 $OutLog = Join-Path $LogsDir "google_host_worker.out.log"; $ErrLog = Join-Path $LogsDir "google_host_worker.err.log"
 New-Item -ItemType Directory -Force -Path $DataDir, $LogsDir | Out-Null
