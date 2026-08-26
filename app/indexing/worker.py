@@ -74,6 +74,11 @@ def _dispatch(job: IndexJob) -> dict[str, Any]:
     worker can service non-embedding jobs without loading the ML runtime.
     """
 
+    # Register the ordinary application/Library models before create_all so a
+    # fresh database is just as valid as the long-lived workstation database.
+    from app import library_models as _library_models  # noqa: F401
+    from app import models as _models  # noqa: F401
+
     Base.metadata.create_all(bind=engine)
     settings = get_settings()
 
