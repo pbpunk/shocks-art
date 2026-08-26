@@ -61,6 +61,12 @@ Runs a bounded repeated indexing/retrieval validation profile for workstation so
 
 The initial v1 profile records repeated indexing-related test passes, disk free-space delta, and available GPU-memory observations. IDX-042 still requires stronger restart/recovery/contention evidence before it can be closed.
 
+### `repo-tests`
+
+Runs the repository's complete `pytest -q` suite at the exact requested SHA using a workstation Python runtime that already has the app and test dependencies. The Sheet cannot select a test file, marker, module, command, Python path, or pytest argument.
+
+This profile is allowed on exact `origin/main` or exact `origin/autonomous/*` tips and exists to validate GitHub-side backlog changes before or after deployment without turning the bridge into an arbitrary test runner.
+
 ## Exact-SHA safety
 
 Before a request can run, the worker fetches `origin/main` and `origin/autonomous/*`.
