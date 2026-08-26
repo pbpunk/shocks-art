@@ -6,9 +6,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from app.host_bridge import HOST_PROFILES, validate_profile
 
-ROOT = Path(__file__).resolve().parents[1]
 PROFILE_SCRIPTS = {
     "whisper-benchmark": ROOT / "tools" / "host_profiles" / "whisper_benchmark.py",
     "private-youtube-probe": ROOT / "tools" / "host_profiles" / "private_youtube_probe.py",
