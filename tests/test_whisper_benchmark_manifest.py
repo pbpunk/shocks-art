@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from tools import run_host_profile
 from tools.host_profiles import whisper_benchmark
 
 
@@ -82,3 +83,10 @@ def test_missing_manifest_receipt_is_actionable_and_path_sanitized(monkeypatch, 
     assert receipt["expected_manifest"] == "data/whisper_benchmark/manifest.json"
     assert receipt["setup_doc"] == "docs/WHISPER_BENCHMARK.md"
     assert str(tmp_path) not in json.dumps(receipt)
+
+
+def test_host_profiles_have_fixed_repository_owned_execution_budgets() -> None:
+    assert set(run_host_profile.PROFILE_TIMEOUT_SECONDS) == set(run_host_profile.PROFILE_SCRIPTS)
+    assert run_host_profile.PROFILE_TIMEOUT_SECONDS["repo-tests"] <= 900
+    assert 900 <= run_host_profile.PROFILE_TIMEOUT_SECONDS["indexer-soak"] <= 1800
+    assert run_host_profile.PROFILE_TIMEOUT_SECONDS["whisper-benchmark"] <= 7200
