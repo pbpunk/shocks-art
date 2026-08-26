@@ -88,7 +88,16 @@ else { $env:PYTHONPATH = $ProjectDir }
 New-Item -ItemType Directory -Force -Path $DataDir, $LogsDir | Out-Null
 $Python = Get-PythonLaunch
 
-Start-BridgeWorker -Python $Python -ScriptName "google_host_worker.py" -ProcessLabel "Google host verifier" `
-    -PidFile "google_host_worker.pid" -OutLog "google_host_worker.out.log" -ErrLog "google_host_worker.err.log"
-Start-BridgeWorker -Python $Python -ScriptName "google_update_worker.py" -ProcessLabel "Google update worker" `
-    -PidFile "google_update_worker.pid" -OutLog "google_update_worker.out.log" -ErrLog "google_update_worker.err.log"
+try {
+    Start-BridgeWorker -Python $Python -ScriptName "google_host_worker.py" -ProcessLabel "Google host verifier" `
+        -PidFile "google_host_worker.pid" -OutLog "google_host_worker.out.log" -ErrLog "google_host_worker.err.log"
+} catch {
+    Write-Warning "Google host verifier did not start: $($_.Exception.Message)"
+}
+
+try {
+    Start-BridgeWorker -Python $Python -ScriptName "google_update_worker.py" -ProcessLabel "Google update worker" `
+        -PidFile "google_update_worker.pid" -OutLog "google_update_worker.out.log" -ErrLog "google_update_worker.err.log"
+} catch {
+    Write-Warning "Google update worker did not start: $($_.Exception.Message)"
+}
