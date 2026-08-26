@@ -18,6 +18,7 @@ CANDIDATES = (
 )
 LIVE_ROOT = Path(os.getenv("SHOCKS_HOST_LIVE_ROOT", Path(__file__).resolve().parents[2])).resolve()
 DEFAULT_MANIFEST_PATH = LIVE_ROOT / "data" / "whisper_benchmark" / "manifest.json"
+DEFAULT_MANIFEST_HINT = "data/whisper_benchmark/manifest.json"
 SETUP_DOC = "docs/WHISPER_BENCHMARK.md"
 
 
@@ -137,7 +138,7 @@ def main() -> int:
             {
                 "summary": "Whisper benchmark manifest is not ready",
                 "configured": False,
-                "expected_manifest": str(manifest),
+                "expected_manifest": DEFAULT_MANIFEST_HINT,
                 "setup_doc": SETUP_DOC,
             },
             2,
@@ -149,7 +150,7 @@ def main() -> int:
             {
                 "summary": "Whisper benchmark manifest is invalid",
                 "configured": True,
-                "manifest": str(manifest),
+                "manifest_name": manifest.name,
                 "setup_doc": SETUP_DOC,
                 "error": str(exc)[:800],
             },
