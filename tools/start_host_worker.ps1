@@ -72,8 +72,9 @@ function Get-BridgePython {
     $BridgePython = Join-Path $BridgeVenv "Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $BridgePython)) {
         Write-Host "Creating managed Google bridge Python environment..."
+        $BaseExecutable = [string]$BasePython.FilePath
         $VenvArgs = @($BasePython.PrefixArgs) + @("-m", "venv", $BridgeVenv)
-        & $BasePython.FilePath @VenvArgs
+        & $BaseExecutable @VenvArgs
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $BridgePython)) {
             throw "Could not create managed Google bridge Python environment at $BridgeVenv."
         }
