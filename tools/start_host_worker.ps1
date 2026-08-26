@@ -80,6 +80,11 @@ if (-not $env:SHOCKS_GOOGLE_SPREADSHEET_ID) {
     $env:SHOCKS_GOOGLE_SPREADSHEET_ID = $DefaultSpreadsheetId
     Write-Host "Using repository default Shock's Art GPT Bridge spreadsheet."
 }
+# These workers are launched as scripts under tools/. Make the repository root
+# importable so app.* resolves deterministically without depending on caller cwd.
+if ($env:PYTHONPATH) { $env:PYTHONPATH = "$ProjectDir;$($env:PYTHONPATH)" }
+else { $env:PYTHONPATH = $ProjectDir }
+
 New-Item -ItemType Directory -Force -Path $DataDir, $LogsDir | Out-Null
 $Python = Get-PythonLaunch
 
