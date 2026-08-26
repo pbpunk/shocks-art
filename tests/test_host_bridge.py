@@ -16,10 +16,16 @@ from app.host_bridge import (
 
 
 def test_host_profiles_are_fixed_and_narrow() -> None:
-    assert HOST_PROFILES == ("whisper-benchmark", "private-youtube-probe", "indexer-soak")
+    assert HOST_PROFILES == (
+        "whisper-benchmark",
+        "private-youtube-probe",
+        "indexer-soak",
+        "repo-tests",
+    )
     assert set(HOST_PROFILE_POLICIES) == set(HOST_PROFILES)
     assert profile_policy("indexer-soak") == "main-only"
     assert profile_policy("whisper-benchmark") == "candidate-or-main"
+    assert profile_policy("repo-tests") == "candidate-or-main"
 
 
 def test_request_id_rejects_shellish_values() -> None:
