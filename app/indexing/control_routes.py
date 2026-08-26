@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -11,10 +10,12 @@ from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import Request
 
 from app.indexing.job_queue import IndexJob, IndexJobQueue, IndexJobQueueError
+from app.library_routes import url_path
 
 
 router = APIRouter()
 templates = Jinja2Templates(directory="templates")
+templates.env.globals["url_path"] = url_path
 
 
 class QueueJobRequest(BaseModel):
