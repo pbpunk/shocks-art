@@ -49,6 +49,10 @@ def test_app_lifecycle_owns_indexer_worker() -> None:
     assert 'indexer_worker.pid' in start_worker
     assert 'app.indexing.worker' in stop_worker
     assert 'indexer_worker_cleanup.py' in stop_worker
+    assert 'import sys; print(sys.executable)' in start_worker
+    assert 'Adopted running Library indexer PID' in start_worker
+    assert 'Multiple Library indexer processes are running' in start_worker
+    assert 'PrefixArgs' not in start_worker
     assert "exit 0" not in start_worker
     assert "exit 0" not in stop_worker
 
