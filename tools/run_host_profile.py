@@ -16,6 +16,7 @@ PROFILE_SCRIPTS = {
     "whisper-benchmark": ROOT / "tools" / "host_profiles" / "whisper_benchmark.py",
     "private-youtube-probe": ROOT / "tools" / "host_profiles" / "private_youtube_probe.py",
     "indexer-soak": ROOT / "tools" / "host_profiles" / "indexer_soak.py",
+    "repo-tests": ROOT / "tools" / "host_profiles" / "repo_tests.py",
 }
 
 
