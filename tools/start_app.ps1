@@ -102,6 +102,13 @@ if ($Network.PublicOk) {
     Test-PublicContract -WarnOnly | Out-Null
 }
 
+Write-Step "Starting autonomous host bridge"
+try {
+    & (Join-Path $PSScriptRoot "start_host_worker.ps1")
+} catch {
+    Write-Warning "Autonomous host bridge did not start: $($_.Exception.Message)"
+}
+
 $AppUrl = "$PublicBaseUrl$Route/"
 try {
     Start-Process $AppUrl

@@ -99,7 +99,7 @@
         "phase": {"type": "string", "minLength": 1},
         "title": {"type": "string", "minLength": 1},
         "status": {"enum": ["todo", "in_progress", "blocked", "done", "deferred"]},
-        "execution": {"enum": ["github", "codex", "both"]},
+        "execution": {"enum": ["github", "codex", "host", "both", "user"]},
         "priority": {"enum": ["P0", "P1", "P2", "P3"]},
         "required": {"type": "boolean"},
         "dependsOn": {
