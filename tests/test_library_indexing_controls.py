@@ -70,6 +70,4 @@ def test_control_api_rejects_arbitrary_job_types_and_fields(client, monkeypatch,
         "/shocks_art/api/library/indexing/jobs",
         json={"job_type": "visual-pending", "command": "whoami"},
     )
-    assert extra.status_code == 200  # pydantic ignores unknown transport fields; they never reach queue payload
-    queued = extra.json()["job"]
-    assert queued["jobType"] == "visual-pending"
+    assert extra.status_code == 422
