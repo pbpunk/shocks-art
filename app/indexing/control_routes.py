@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.requests import Request
 
 from app.indexing.job_queue import IndexJob, IndexJobQueue, IndexJobQueueError
@@ -18,6 +18,8 @@ templates = Jinja2Templates(directory="templates")
 
 
 class QueueJobRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     job_type: str
     media_id: str = ""
     limit: int | None = Field(default=None, ge=1, le=1000)
