@@ -23,7 +23,7 @@ if (Test-Path -LiteralPath $PidPath) {
         $Existing = Get-CimInstance Win32_Process -Filter "ProcessId=$ExistingPid" -ErrorAction SilentlyContinue
         if ($Existing -and $Existing.CommandLine -match [regex]::Escape($Signature)) {
             Write-Host "Library indexer is already running (PID $ExistingPid)."
-            exit 0
+            return
         }
     }
     Remove-Item -LiteralPath $PidPath -Force -ErrorAction SilentlyContinue
