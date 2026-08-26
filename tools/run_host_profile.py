@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -21,12 +22,13 @@ def main() -> int:
         return 2
     profile = validate_profile(sys.argv[1])
     script = PROFILE_SCRIPTS[profile]
+    python = sys.executable
+    if profile == "whisper-benchmark" and os.getenv("SHOCKS_WHISPER_PYTHON", "").strip():
+        python = os.environ["SHOCKS_WHISPER_PYTHON"].strip()
     result = subprocess.run(
-        [sys.executable, str(script)],
-        cwd=ROOT,
-        text=True,
-        capture_output=True,
-        check=False,
+        [python, str(script)], cwd=ROOT, env=os.environ.copy(), text=True,
+        capture_output=True, check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if result.stderr:
         print(result.stderr, file=sys.stderr, end="")

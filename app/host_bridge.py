@@ -4,7 +4,6 @@ import re
 from dataclasses import dataclass
 from typing import Final
 
-
 REQUEST_ID_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$")
 REVISION_RE: Final = re.compile(r"^[0-9a-fA-F]{40}$")
 
@@ -13,36 +12,21 @@ HOST_PROFILES: Final[tuple[str, ...]] = (
     "private-youtube-probe",
     "indexer-soak",
 )
-
+HOST_PROFILE_POLICIES: Final[dict[str, str]] = {
+    "whisper-benchmark": "candidate-or-main",
+    "private-youtube-probe": "candidate-or-main",
+    "indexer-soak": "main-only",
+}
 VERIFICATION_HEADERS: Final[tuple[str, ...]] = (
-    "request_id",
-    "created_at",
-    "expected_revision",
-    "profile",
-    "requester_id",
-    "state",
-    "started_at",
-    "finished_at",
-    "tested_revision",
-    "outcome",
-    "exit_code",
-    "duration_seconds",
-    "summary",
-    "result_json",
+    "request_id", "created_at", "expected_revision", "profile", "requester_id", "state",
+    "started_at", "finished_at", "tested_revision", "outcome", "exit_code",
+    "duration_seconds", "summary", "result_json",
 )
-
 STATE_HEADERS: Final[tuple[str, ...]] = (
-    "host_updated_at",
-    "host_status",
-    "host_revision",
-    "host_last_request_id",
-    "host_last_error",
-    "host_active_request_id",
+    "host_updated_at", "host_status", "host_revision", "host_last_request_id",
+    "host_last_error", "host_active_request_id",
 )
-
-TERMINAL_STATES: Final[frozenset[str]] = frozenset(
-    {"completed", "failed", "superseded", "rejected"}
-)
+TERMINAL_STATES: Final[frozenset[str]] = frozenset({"completed", "failed", "superseded", "rejected"})
 
 
 class HostBridgeValidationError(ValueError):
@@ -61,27 +45,26 @@ class HostVerificationRequest:
 def validate_request_id(value: object) -> str:
     request_id = str(value or "").strip()
     if not REQUEST_ID_RE.fullmatch(request_id):
-        raise HostBridgeValidationError(
-            "request_id must be 1-80 characters using only letters, digits, '.', '_' or '-'"
-        )
+        raise HostBridgeValidationError("request_id must be 1-80 characters using only letters, digits, '.', '_' or '-'")
     return request_id
 
 
 def normalize_revision(value: object) -> str:
     revision = str(value or "").strip().lower()
     if not REVISION_RE.fullmatch(revision):
-        raise HostBridgeValidationError(
-            "expected_revision must be a full 40-character Git commit SHA"
-        )
+        raise HostBridgeValidationError("expected_revision must be a full 40-character Git commit SHA")
     return revision
 
 
 def validate_profile(value: object) -> str:
     profile = str(value or "").strip().lower()
     if profile not in HOST_PROFILES:
-        allowed = ", ".join(HOST_PROFILES)
-        raise HostBridgeValidationError(f"profile must be one of: {allowed}")
+        raise HostBridgeValidationError(f"profile must be one of: {', '.join(HOST_PROFILES)}")
     return profile
+
+
+def profile_policy(profile: str) -> str:
+    return HOST_PROFILE_POLICIES[validate_profile(profile)]
 
 
 def parse_request_row(row: list[object] | tuple[object, ...]) -> HostVerificationRequest:
@@ -97,6 +80,4 @@ def parse_request_row(row: list[object] | tuple[object, ...]) -> HostVerificatio
 
 
 def request_fingerprint(request: HostVerificationRequest) -> tuple[str, str, str]:
-    """Immutable identity used to detect a Sheet row being mutated after registration."""
-
     return request.request_id, request.expected_revision, request.profile
