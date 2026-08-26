@@ -56,3 +56,12 @@ def test_worker_uses_fixed_helper_and_no_sheet_command_field() -> None:
     assert "command" not in {header.lower() for header in UPDATES_HEADERS}
     assert "path" not in {header.lower() for header in UPDATES_HEADERS}
     assert "branch" not in {header.lower() for header in UPDATES_HEADERS}
+
+
+def test_app_contract_defines_shared_data_directory_for_bridge_lifecycle() -> None:
+    contract = (ROOT / "tools" / "app_contract.ps1").read_text(encoding="utf-8")
+    assert '$DataDir = Join-Path $ProjectDir "data"' in contract
+    start = (ROOT / "tools" / "start_host_worker.ps1").read_text(encoding="utf-8")
+    stop = (ROOT / "tools" / "stop_host_worker.ps1").read_text(encoding="utf-8")
+    assert "$DataDir" in start
+    assert "$DataDir" in stop
