@@ -1,5 +1,11 @@
 . (Join-Path $PSScriptRoot "app_contract.ps1")
 
+try {
+    & (Join-Path $PSScriptRoot "stop_host_worker.ps1")
+} catch {
+    Write-Warning "Autonomous host bridge stop failed: $($_.Exception.Message)"
+}
+
 Set-Location -LiteralPath $ProjectDir
 $Listeners = @(Get-PortListenerProcesses)
 if ($Listeners.Count -eq 0) {
