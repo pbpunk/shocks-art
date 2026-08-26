@@ -174,6 +174,7 @@ def test_library_page_exposes_visual_semantic_search(client):
     page = client.get("/shocks_art/library")
     assert page.status_code == 200
     assert 'id="semantic-search-form"' in page.text
-    assert "Search visuals" in page.text
-    assert "Filenames and titles are display metadata, not scoring inputs." in page.text
+    assert 'placeholder="Search what is in the footage…"' in page.text
+    assert 'id="semantic-search-button"' in page.text
+    assert ">Search</button>" in page.text
     assert "Semantic indexing comes next." not in page.text
