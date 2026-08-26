@@ -1,5 +1,20 @@
 . (Join-Path $PSScriptRoot "app_contract.ps1")
 
+function Clear-DeadIndexerLease {
+    param([int]$StoppedPid)
+    $Arguments = @("tools/indexer_worker_cleanup.py", "--pid", "$StoppedPid")
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        try { & py -3.13 @Arguments; if ($LASTEXITCODE -eq 0) { return } } catch {}
+        & py -3 @Arguments
+        if ($LASTEXITCODE -eq 0) { return }
+    }
+    if (Get-Command python -ErrorAction SilentlyContinue) {
+        & python @Arguments
+        if ($LASTEXITCODE -eq 0) { return }
+    }
+    throw "Could not run fixed Library indexer lease cleanup after stopping PID $StoppedPid."
+}
+
 $PidPath = Join-Path $DataDir "indexer_worker.pid"
 if (-not (Test-Path -LiteralPath $PidPath)) { Write-Host "Library indexer is already stopped."; exit 0 }
 
@@ -13,8 +28,9 @@ if ($WorkerPid -le 0) {
 
 $Process = Get-CimInstance Win32_Process -Filter "ProcessId=$WorkerPid" -ErrorAction SilentlyContinue
 if (-not $Process) {
-    Remove-Item -LiteralPath $PidPath -Force -ErrorAction SilentlyContinue
-    Write-Host "Library indexer is already stopped."
+    try { Clear-DeadIndexerLease -StoppedPid $WorkerPid }
+    finally { Remove-Item -LiteralPath $PidPath -Force -ErrorAction SilentlyContinue }
+    Write-Host "Library indexer is already stopped; stale lease reconciled."
     exit 0
 }
 if ($Process.CommandLine -notmatch [regex]::Escape("app.indexing.worker")) {
@@ -26,8 +42,9 @@ Stop-Process -Id $WorkerPid -Force -ErrorAction Stop
 $Stopwatch = [Diagnostics.Stopwatch]::StartNew()
 while ($Stopwatch.Elapsed.TotalSeconds -lt 10) {
     if (-not (Get-Process -Id $WorkerPid -ErrorAction SilentlyContinue)) {
+        Clear-DeadIndexerLease -StoppedPid $WorkerPid
         Remove-Item -LiteralPath $PidPath -Force -ErrorAction SilentlyContinue
-        Write-Host "Library indexer stopped."
+        Write-Host "Library indexer stopped and durable lease reconciled."
         exit 0
     }
     Start-Sleep -Milliseconds 250
