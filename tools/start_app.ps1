@@ -95,6 +95,13 @@ if (-not (Test-HttpEndpoint -Url "$LocalBaseUrl/api/ping" -TimeoutSeconds 4)) {
     throw "Local contract verification failed: $LocalBaseUrl/api/ping"
 }
 
+Write-Step "Starting offline Library indexer"
+try {
+    & (Join-Path $PSScriptRoot "start_indexer_worker.ps1")
+} catch {
+    Write-Warning "Library indexer did not start: $($_.Exception.Message)"
+}
+
 Write-Step "Configuring app-owned Tailscale routes"
 $Network = Set-AppTailscaleRoutes
 if ($Network.PublicOk) {

@@ -1,5 +1,8 @@
 . (Join-Path $PSScriptRoot "app_contract.ps1")
 
+try { & (Join-Path $PSScriptRoot "stop_indexer_worker.ps1") }
+catch { Write-Warning "Library indexer stop failed: $($_.Exception.Message)" }
+
 if ($env:SHOCKS_KEEP_HOST_BRIDGE -ne "1") {
     try { & (Join-Path $PSScriptRoot "stop_host_worker.ps1") }
     catch { Write-Warning "Autonomous host bridge stop failed: $($_.Exception.Message)" }
