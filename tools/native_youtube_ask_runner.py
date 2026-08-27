@@ -114,7 +114,7 @@ def ask_youtube(url: str, prompt: str, profile_dir: Path, headless: bool, timeou
             # readiness condition. DOMContentLoaded plus a visible page shell is.
             stage = "wait for the YouTube page shell"
             page.locator("body").wait_for(state="visible", timeout=30_000)
-            stage = "open the YouTube Ask panel"
+            stage = "wait for the YouTube Ask UI"
             ensure_ask_panel_open(page)
             stage = "capture the Ask-panel baseline"
             initial_text = ask_panel_text(page)
@@ -146,21 +146,37 @@ def ask_panel_is_open(page) -> bool:
     return False
 
 
-def ensure_ask_panel_open(page) -> None:
-    # Persistent Chrome profiles can restore the engagement panel already open.
-    # That is a valid ready state; do not require an Ask button in that case.
-    if ask_panel_is_open(page):
-        return
-    button = visible_ask_button(page)
-    if not button:
-        if page.get_by_role("link", name=re.compile(r"Sign in", re.I)).count() or page.get_by_role("button", name=re.compile(r"Sign in", re.I)).count():
+def signed_out(page) -> bool:
+    return bool(
+        page.get_by_role("link", name=re.compile(r"Sign in", re.I)).count()
+        or page.get_by_role("button", name=re.compile(r"Sign in", re.I)).count()
+    )
+
+
+def ensure_ask_panel_open(page, timeout_seconds: int = 45) -> None:
+    """Wait for YouTube's asynchronously-rendered Ask UI and open it if needed."""
+
+    deadline = time.time() + timeout_seconds
+    while time.time() < deadline:
+        # Persistent Chrome profiles can restore the engagement panel already open.
+        if ask_panel_is_open(page):
+            return
+        button = visible_ask_button(page)
+        if button:
+            button.click(timeout=30_000)
+            page.get_by_text(ASK_PANEL_HEADING).wait_for(timeout=30_000)
+            return
+        if signed_out(page):
             raise RuntimeError(
                 "The automation browser profile is signed out, so YouTube Ask is not available. "
                 "Open the YouTube profile setup from the app, sign in, then run Native Ask again."
             )
-        raise RuntimeError("Could not find a visible YouTube Ask button or an already-open Ask panel on this video page.")
-    button.click(timeout=30_000)
-    page.get_by_text(ASK_PANEL_HEADING).wait_for(timeout=30_000)
+        time.sleep(1)
+
+    raise RuntimeError(
+        f"YouTube Ask UI did not become available within {timeout_seconds} seconds; "
+        "no visible Ask button or already-open Ask panel was found."
+    )
 
 
 def click_ask_button(page) -> None:
