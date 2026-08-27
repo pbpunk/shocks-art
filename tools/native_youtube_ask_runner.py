@@ -173,19 +173,42 @@ def ask_panel_text(page) -> str:
     )
 
 
+def extract_appended_panel_text(initial_text: str, current_text: str) -> str:
+    """Return only text appended during this Ask turn.
+
+    YouTube can preserve prior Ask conversation text in a persistent browser profile.
+    Importing the whole panel would incorrectly stamp that prior content onto the
+    current Stream. Fail closed if the current panel is not an append-only extension
+    of the baseline captured immediately before submitting this prompt.
+    """
+
+    initial = initial_text.replace("\r\n", "\n").rstrip()
+    current = current_text.replace("\r\n", "\n").rstrip()
+    if not initial:
+        return current.strip()
+    if current == initial:
+        return ""
+    if not current.startswith(initial):
+        raise RuntimeError(
+            "YouTube Ask panel changed non-append-only; refusing to import ambiguous or stale conversation context."
+        )
+    return current[len(initial) :].strip()
+
+
 def wait_for_response(page, initial_text: str, timeout_seconds: int) -> str:
     deadline = time.time() + timeout_seconds
-    last_text = initial_text
+    last_delta = ""
     stable_count = 0
     while time.time() < deadline:
         text = ask_panel_text(page)
-        if len(text) > len(initial_text) + 400 and text == last_text:
+        delta = extract_appended_panel_text(initial_text, text)
+        if len(delta) > 400 and delta == last_delta:
             stable_count += 1
             if stable_count >= 3:
-                return clean_panel_text(text)
+                return clean_panel_text(delta)
         else:
             stable_count = 0
-            last_text = text
+            last_delta = delta
         time.sleep(2)
     raise TimeoutError("YouTube Ask did not produce a stable response before timeout.")
 
