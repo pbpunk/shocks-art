@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
+from typing import Callable
 
 from sqlalchemy import exists, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
@@ -26,6 +29,7 @@ from app.services.native_youtube import (
 
 NATIVE_ASK_MODEL_PREFIX = NATIVE_YOUTUBE_MODEL
 CLIPS_NATIVE_ASK_SOURCE = f"{NATIVE_ASK_MODEL_PREFIX}-clips-update"
+NATIVE_ASK_DB_WRITE_ATTEMPTS = 5
 
 
 def is_native_ask_model(model: str | None) -> bool:
@@ -115,6 +119,15 @@ def _latest_stream_transcript(db: Session, stream: Stream) -> StreamTranscript |
     )
 
 
+def _is_sqlite_locked(exc: Exception) -> bool:
+    current: BaseException | None = exc
+    while current is not None:
+        if "database is locked" in str(current).casefold():
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 def save_clips_native_ask_response(db: Session, stream: Stream, response_text: str):
     """Persist a source-grounded YouTube Ask response for the production Clips feed."""
 
@@ -126,14 +139,14 @@ def save_clips_native_ask_response(db: Session, stream: Stream, response_text: s
         status="processing",
         request_started_at=datetime.now(timezone.utc),
     )
-    db.add(run)
-    db.flush()
-
-    raw_path = native_response_path(run.analysis_run_id)
-    raw_path.write_text(response_text, encoding="utf-8")
-    run.raw_response_location = str(raw_path)
-
     try:
+        db.add(run)
+        db.flush()
+
+        raw_path = native_response_path(run.analysis_run_id)
+        raw_path.write_text(response_text, encoding="utf-8")
+        run.raw_response_location = str(raw_path)
+
         response = parse_native_youtube_response(response_text, stream)
         response = ground_native_ask_transcript_evidence(
             response,
@@ -165,13 +178,55 @@ def save_clips_native_ask_response(db: Session, stream: Stream, response_text: s
         db.flush()
         return run, candidates, skipped_duplicates
     except Exception as exc:
-        run.status = "failed"
-        run.request_completed_at = datetime.now(timezone.utc)
-        run.exception_message = str(exc)
-        run.validation_errors = [str(exc)]
-        stream.processing_status = "failed"
-        db.flush()
+        # A failed flush poisons the SQLAlchemy transaction. Roll it back before
+        # attempting any subsequent write. SQLite lock errors are left transient so
+        # the caller can retry the exact same already-returned Ask response.
+        db.rollback()
+        if not _is_sqlite_locked(exc):
+            refreshed = db.get(Stream, stream.stream_id)
+            if refreshed is not None:
+                refreshed.processing_status = "failed"
+                db.flush()
         raise
+
+
+def _persist_native_ask_with_lock_retry(
+    stream_id: str,
+    response_text: str,
+    *,
+    attempts: int = NATIVE_ASK_DB_WRITE_ATTEMPTS,
+    sleep_fn: Callable[[float], None] = time.sleep,
+):
+    """Persist one already-returned Ask response with bounded SQLite lock retries.
+
+    The browser interaction is deliberately outside this retry boundary. A transient
+    SQLite writer lock must never cause a second YouTube Ask turn with potentially
+    different editorial output.
+    """
+
+    max_attempts = max(1, int(attempts))
+    last_error: Exception | None = None
+    for attempt in range(1, max_attempts + 1):
+        with SessionLocal() as db:
+            stream = db.get(Stream, stream_id)
+            if not stream:
+                raise RuntimeError(f"Stream disappeared before Ask import: {stream_id}")
+            try:
+                run, candidates, skipped_duplicates = save_clips_native_ask_response(
+                    db,
+                    stream,
+                    response_text,
+                )
+                db.commit()
+                return run.analysis_run_id, [candidate.candidate_window_id for candidate in candidates], skipped_duplicates
+            except Exception as exc:
+                db.rollback()
+                last_error = exc
+                if not _is_sqlite_locked(exc) or attempt >= max_attempts:
+                    raise
+        sleep_fn(min(4.0, 0.5 * (2 ** (attempt - 1))))
+    assert last_error is not None
+    raise last_error
 
 
 def run_clips_native_ask(stream_id: str) -> dict:
@@ -212,37 +267,35 @@ def run_clips_native_ask(stream_id: str) -> dict:
                 db.commit()
         return read_native_job_status(stream_id)
 
-    with SessionLocal() as db:
-        stream = db.get(Stream, stream_id)
-        if not stream:
-            return write_native_job_status(
-                stream_id,
-                status="failed",
-                message=f"Stream disappeared before Ask import: {stream_id}",
-            )
-        try:
-            run, candidates, skipped_duplicates = save_clips_native_ask_response(
-                db,
-                stream,
-                output_path.read_text(encoding="utf-8"),
-            )
-            db.commit()
-            return write_native_job_status(
-                stream_id,
-                status="complete",
-                message=(
-                    f"Imported {len(candidates)} YouTube Ask candidate(s); "
-                    f"skipped {skipped_duplicates} native duplicate(s)."
-                ),
-                analysis_run_id=run.analysis_run_id,
-                candidate_window_ids=[candidate.candidate_window_id for candidate in candidates],
-                source=CLIPS_NATIVE_ASK_SOURCE,
-            )
-        except Exception as exc:
-            db.commit()
-            return write_native_job_status(
-                stream_id,
-                status="failed",
-                message=f"YouTube Ask import failed: {exc}",
-                source=CLIPS_NATIVE_ASK_SOURCE,
-            )
+    response_text = output_path.read_text(encoding="utf-8")
+    try:
+        analysis_run_id, candidate_window_ids, skipped_duplicates = _persist_native_ask_with_lock_retry(
+            stream_id,
+            response_text,
+        )
+        return write_native_job_status(
+            stream_id,
+            status="complete",
+            message=(
+                f"Imported {len(candidate_window_ids)} YouTube Ask candidate(s); "
+                f"skipped {skipped_duplicates} native duplicate(s)."
+            ),
+            analysis_run_id=analysis_run_id,
+            candidate_window_ids=candidate_window_ids,
+            source=CLIPS_NATIVE_ASK_SOURCE,
+        )
+    except Exception as exc:
+        with SessionLocal() as db:
+            stream = db.get(Stream, stream_id)
+            if stream:
+                try:
+                    stream.processing_status = "failed"
+                    db.commit()
+                except OperationalError:
+                    db.rollback()
+        return write_native_job_status(
+            stream_id,
+            status="failed",
+            message=f"YouTube Ask import failed: {exc}",
+            source=CLIPS_NATIVE_ASK_SOURCE,
+        )
