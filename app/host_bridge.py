@@ -12,6 +12,7 @@ HOST_PROFILES: Final[tuple[str, ...]] = (
     "private-youtube-probe",
     "indexer-soak",
     "clips-native-ask-smoke",
+    "clips-native-ask-rerun",
     "repo-tests",
 )
 HOST_PROFILE_POLICIES: Final[dict[str, str]] = {
@@ -19,6 +20,7 @@ HOST_PROFILE_POLICIES: Final[dict[str, str]] = {
     "private-youtube-probe": "candidate-or-main",
     "indexer-soak": "main-only",
     "clips-native-ask-smoke": "main-only",
+    "clips-native-ask-rerun": "main-only",
     "repo-tests": "candidate-or-main",
 }
 VERIFICATION_HEADERS: Final[tuple[str, ...]] = (

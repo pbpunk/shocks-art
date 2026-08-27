@@ -17,16 +17,15 @@ PROFILE_SCRIPTS = {
     "private-youtube-probe": ROOT / "tools" / "host_profiles" / "private_youtube_probe.py",
     "indexer-soak": ROOT / "tools" / "host_profiles" / "indexer_soak.py",
     "clips-native-ask-smoke": ROOT / "tools" / "host_profiles" / "clips_native_ask_smoke.py",
+    "clips-native-ask-rerun": ROOT / "tools" / "host_profiles" / "clips_native_ask_rerun.py",
     "repo-tests": ROOT / "tools" / "host_profiles" / "repo_tests.py",
 }
 
-# Fixed repository-owned budgets prevent a wedged profile from monopolizing the
-# single workstation verifier until the broad worker timeout expires. The Sheet
-# cannot alter these values.
 PROFILE_TIMEOUT_SECONDS = {
     "repo-tests": 900,
     "private-youtube-probe": 900,
     "clips-native-ask-smoke": 1200,
+    "clips-native-ask-rerun": 1200,
     "indexer-soak": 1800,
     "whisper-benchmark": 7200,
 }
