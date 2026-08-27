@@ -17,12 +17,21 @@ def emit(payload: dict[str, Any], code: int = 0) -> int:
     return code
 
 
+def safe_failure_job(job: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: job.get(key)
+        for key in ("status", "message", "attempt", "returncode", "stderr", "stdout", "response_preview")
+        if job.get(key) not in (None, "")
+    }
+
+
 def main() -> int:
     from sqlalchemy import func, select
 
     from app.core.database import SessionLocal
     from app.models import AnalysisRun, CandidateWindow, Stream
     from app.services.clips_native_ask import CLIPS_NATIVE_ASK_SOURCE, NATIVE_ASK_MODEL_PREFIX, run_clips_native_ask
+    from app.services.native_automation import read_native_job_status
 
     with SessionLocal() as db:
         stream = db.scalar(select(Stream).where(Stream.source_video_id == TARGET_VIDEO_ID))
@@ -35,7 +44,11 @@ def main() -> int:
 
     result = run_clips_native_ask(stream_id)
     if result.get("status") != "complete":
-        return emit({"summary": f"YouTube Ask rerun failed: {result.get('message', 'unknown failure')}", "source_video_id": TARGET_VIDEO_ID}, 1)
+        return emit({
+            "summary": f"YouTube Ask rerun failed: {result.get('message', 'unknown failure')}",
+            "source_video_id": TARGET_VIDEO_ID,
+            "job": safe_failure_job(read_native_job_status(stream_id)),
+        }, 1)
 
     run_id = str(result.get("analysis_run_id") or "")
     candidate_ids = [str(value) for value in result.get("candidate_window_ids") or []]
