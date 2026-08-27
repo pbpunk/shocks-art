@@ -223,13 +223,22 @@ def ask_panel_text(page) -> str:
     )
 
 
-def extract_appended_panel_text(initial_text: str, current_text: str) -> str:
-    """Return only text appended during this Ask turn.
+def common_prefix_length(left: str, right: str) -> int:
+    limit = min(len(left), len(right))
+    index = 0
+    while index < limit and left[index] == right[index]:
+        index += 1
+    return index
 
-    YouTube can preserve prior Ask conversation text in a persistent browser profile.
-    Importing the whole panel would incorrectly stamp that prior content onto the
-    current Stream. Fail closed if the current panel is not an append-only extension
-    of the baseline captured immediately before submitting this prompt.
+
+def extract_appended_panel_text(initial_text: str, current_text: str) -> str:
+    """Return text produced during this Ask turn without importing prior history.
+
+    YouTube preserves prior Ask conversation content but can rewrite a small trailing
+    UI region (suggested questions, input chrome, loading state) when a new prompt is
+    submitted. Preserve the strict append-only fast path, then allow only bounded
+    trailing churn when most of the original panel remains an identical prefix.
+    A larger rewrite still fails closed rather than risking stale-video attribution.
     """
 
     initial = initial_text.replace("\r\n", "\n").rstrip()
@@ -238,11 +247,23 @@ def extract_appended_panel_text(initial_text: str, current_text: str) -> str:
         return current.strip()
     if current == initial:
         return ""
-    if not current.startswith(initial):
+    if current.startswith(initial):
+        return current[len(initial) :].strip()
+
+    prefix_len = common_prefix_length(initial, current)
+    # Back up to a complete line so the extracted suffix cannot begin inside a
+    # preserved stale line. Including one changed UI line is safer than including
+    # any of the preserved conversation above it.
+    boundary = initial.rfind("\n", 0, prefix_len) + 1
+    required_prefix = min(len(initial), max(40, int(len(initial) * 0.60)))
+    removed_tail = len(initial) - boundary
+    allowed_removed_tail = max(300, int(len(initial) * 0.40))
+    if boundary < required_prefix or removed_tail > allowed_removed_tail:
         raise RuntimeError(
-            "YouTube Ask panel changed non-append-only; refusing to import ambiguous or stale conversation context."
+            "YouTube Ask panel changed non-append-only beyond bounded trailing UI churn; "
+            "refusing to import ambiguous or stale conversation context."
         )
-    return current[len(initial) :].strip()
+    return current[boundary:].strip()
 
 
 def wait_for_response(page, initial_text: str, timeout_seconds: int) -> str:
