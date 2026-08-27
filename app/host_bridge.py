@@ -11,12 +11,14 @@ HOST_PROFILES: Final[tuple[str, ...]] = (
     "whisper-benchmark",
     "private-youtube-probe",
     "indexer-soak",
+    "clips-native-ask-smoke",
     "repo-tests",
 )
 HOST_PROFILE_POLICIES: Final[dict[str, str]] = {
     "whisper-benchmark": "candidate-or-main",
     "private-youtube-probe": "candidate-or-main",
     "indexer-soak": "main-only",
+    "clips-native-ask-smoke": "main-only",
     "repo-tests": "candidate-or-main",
 }
 VERIFICATION_HEADERS: Final[tuple[str, ...]] = (
