@@ -18,6 +18,7 @@ PROFILE_SCRIPTS = {
     "indexer-soak": ROOT / "tools" / "host_profiles" / "indexer_soak.py",
     "clips-native-ask-smoke": ROOT / "tools" / "host_profiles" / "clips_native_ask_smoke.py",
     "clips-native-ask-rerun": ROOT / "tools" / "host_profiles" / "clips_native_ask_rerun.py",
+    "derived-data-reinitialize": ROOT / "tools" / "host_profiles" / "derived_data_reinitialize.py",
     "repo-tests": ROOT / "tools" / "host_profiles" / "repo_tests.py",
 }
 
@@ -27,6 +28,7 @@ PROFILE_TIMEOUT_SECONDS = {
     "clips-native-ask-smoke": 1200,
     "clips-native-ask-rerun": 1200,
     "indexer-soak": 1800,
+    "derived-data-reinitialize": 7200,
     "whisper-benchmark": 7200,
 }
 
