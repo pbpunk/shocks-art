@@ -16,6 +16,7 @@ PROFILE_SCRIPTS = {
     "whisper-benchmark": ROOT / "tools" / "host_profiles" / "whisper_benchmark.py",
     "private-youtube-probe": ROOT / "tools" / "host_profiles" / "private_youtube_probe.py",
     "indexer-soak": ROOT / "tools" / "host_profiles" / "indexer_soak.py",
+    "clips-native-ask-smoke": ROOT / "tools" / "host_profiles" / "clips_native_ask_smoke.py",
     "repo-tests": ROOT / "tools" / "host_profiles" / "repo_tests.py",
 }
 
@@ -25,6 +26,7 @@ PROFILE_SCRIPTS = {
 PROFILE_TIMEOUT_SECONDS = {
     "repo-tests": 900,
     "private-youtube-probe": 900,
+    "clips-native-ask-smoke": 1200,
     "indexer-soak": 1800,
     "whisper-benchmark": 7200,
 }
