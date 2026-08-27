@@ -71,6 +71,26 @@ Acceptance requires a completed `native-youtube-gemini-sidebar-clips-update` Ana
 
 If every discovered stream already has a completed native-Ask run, the profile fails closed rather than silently reanalyzing completed footage. A new pending stream or an explicitly designed bounded reanalysis fixture is required for another real browser exercise.
 
+### `clips-native-ask-rerun`
+
+Runs one explicitly fixed reanalysis fixture through the production native-YouTube-Ask service. It is `main-only`, targets the repository-owned regression video `pDC14ymQqWY`, and accepts no Sheet-supplied video ID, URL, prompt, browser profile, command, or reanalysis option.
+
+This profile exists for regression acceptance when a completed native-Ask stream must deliberately be exercised again. It verifies that one fresh native-Ask AnalysisRun and its CandidateWindows are persisted and visible in the production Clips feed, direct/non-native AnalysisRun count does not increase, the exact live revision does not move, and the known stale title `Studio Tour and Finished Pieces` is not imported into the rerun.
+
+### `derived-data-reinitialize`
+
+Performs the explicitly approved destructive reinitialization of provisional derived state. This profile is `main-only` and cannot be run from a candidate branch. It must not be requested merely because bridge code exists; the destructive operation requires a separate, explicit user go-ahead for the current reset.
+
+The Sheet supplies only the normal immutable request ID and exact `origin/main` SHA. It cannot supply a database path, deletion scope, source path, model, media ID, stream ID, URL, command, prompt, or rebuild option. The reset scope and rebuild sequence are versioned repository code.
+
+The profile fails closed before deletion when downstream `DerivedAsset`, `PublishingRecord`, or `PerformanceRecord` rows exist, or when an indexing job is actively running. Before clearing derived tables it creates a local SQLite safety backup. It preserves canonical `Stream` and `StreamTranscript` records, raw caption artifacts, the actual local/YouTube source/archive media, the logged-in browser profile, OAuth/API credentials, `.env` configuration, and other workstation secrets. The Library `Media` table is deliberately treated as a derived catalog and is rebuilt from those canonical sources rather than carried forward.
+
+The reinitialization clears derived Clips/indexing state: Stream analysis artifacts, CandidateWindows, AnalysisRuns (including old direct-Gemini working-database lineage), the Library Media catalog, Embeddings, Traces, IndexRuns, non-running durable index jobs, per-stream native-Ask job/response scratch files, and generated visual index artifacts. Stream processing status is returned to queued. The live indexer worker lease is intentionally preserved.
+
+The deterministic rebuild then re-ingests configured local media into a fresh Media catalog, re-synchronizes YouTube Stream Media identities, rebuilds Language Traces from the already-stored JSON3 captions, regenerates local-only visual Traces and Qwen visual embeddings, and reseeds only streams that had completed native-Ask lineage before the reset plus the fixed Fractal Burning regression stream. Direct-Gemini-only streams are not automatically repopulated; they remain pending for the normal native-Ask Clips Update path.
+
+Acceptance requires healthy app state and unchanged exact live revision, unchanged canonical Stream/StreamTranscript counts, zero direct/legacy Gemini AnalysisRuns afterward, no stale `Studio Tour and Finished Pieces` candidate, successful stored-caption rebuild, successful native-Ask reseeding for the selected previously-native streams, and fresh candidates for `pDC14ymQqWY`. The receipt includes sanitized before/after counts and the safety-backup filename, not the backup path or workstation secrets.
+
 ### `repo-tests`
 
 Runs the repository's complete `pytest -q` suite at the exact requested SHA using a workstation Python runtime that already has the app and test dependencies. The Sheet cannot select a test file, marker, module, command, Python path, or pytest argument.
