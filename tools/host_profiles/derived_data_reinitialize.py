@@ -57,6 +57,24 @@ def live_python(live_root: Path) -> Path:
     raise RuntimeError("no live Python runtime has the required SQLAlchemy/Playwright dependencies")
 
 
+def run_json_helper(python: Path, helper: Path, live_root: Path, *, timeout: int) -> tuple[int, dict[str, Any], bool]:
+    result = subprocess.run(
+        [str(python), str(helper)],
+        cwd=live_root,
+        env=os.environ.copy(),
+        text=True,
+        capture_output=True,
+        timeout=timeout,
+        check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    try:
+        parsed = json.loads(result.stdout.strip().splitlines()[-1]) if result.stdout.strip() else {}
+    except json.JSONDecodeError:
+        parsed = {"summary": f"{helper.name} returned non-JSON output"}
+    return result.returncode, parsed, bool(result.stderr.strip())
+
+
 def main() -> int:
     expected = os.getenv("SHOCKS_HOST_EXPECTED_REVISION", "").strip().lower()
     live_root_value = os.getenv("SHOCKS_HOST_LIVE_ROOT", "").strip()
@@ -72,26 +90,32 @@ def main() -> int:
             return emit({"summary": "Live app health is not HTTP 200 before reinitialization"}, 1)
 
         python = live_python(live_root)
-        helper = live_root / "tools" / "reinitialize_derived_data_live.py"
-        result = subprocess.run(
-            [str(python), str(helper)],
-            cwd=live_root,
-            env=os.environ.copy(),
-            text=True,
-            capture_output=True,
-            timeout=6600,
-            check=False,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        preclear_helper = live_root / "tools" / "prepare_derived_data_reinitialize.py"
+        preclear_code, preclear, preclear_stderr = run_json_helper(
+            python,
+            preclear_helper,
+            live_root,
+            timeout=180,
         )
-        parsed: dict[str, Any]
-        try:
-            parsed = json.loads(result.stdout.strip().splitlines()[-1]) if result.stdout.strip() else {}
-        except json.JSONDecodeError:
-            parsed = {"summary": "Derived-data helper returned non-JSON output"}
-        if result.stderr.strip():
+        if preclear_stderr:
+            preclear["helper_stderr_present"] = True
+        if preclear_code != 0:
+            preclear.setdefault("summary", f"Derived-data pre-clear exited with code {preclear_code}")
+            return emit(preclear, 1)
+
+        helper = live_root / "tools" / "reinitialize_derived_data_live.py"
+        result_code, parsed, helper_stderr = run_json_helper(
+            python,
+            helper,
+            live_root,
+            timeout=6600,
+        )
+        if helper_stderr:
             parsed["helper_stderr_present"] = True
-        if result.returncode != 0:
-            parsed.setdefault("summary", f"Derived-data helper exited with code {result.returncode}")
+        parsed["unpublished_derived_assets_removed"] = int(preclear.get("derived_assets_removed") or 0)
+        parsed["preclear_backup_file"] = str(preclear.get("preclear_backup_file") or "")
+        if result_code != 0:
+            parsed.setdefault("summary", f"Derived-data helper exited with code {result_code}")
             return emit(parsed, 1)
         if git_revision(live_root) != expected:
             return emit({**parsed, "summary": "Live checkout moved during derived-data reinitialization"}, 1)
