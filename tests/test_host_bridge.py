@@ -20,10 +20,12 @@ def test_host_profiles_are_fixed_and_narrow() -> None:
         "whisper-benchmark",
         "private-youtube-probe",
         "indexer-soak",
+        "clips-native-ask-smoke",
         "repo-tests",
     )
     assert set(HOST_PROFILE_POLICIES) == set(HOST_PROFILES)
     assert profile_policy("indexer-soak") == "main-only"
+    assert profile_policy("clips-native-ask-smoke") == "main-only"
     assert profile_policy("whisper-benchmark") == "candidate-or-main"
     assert profile_policy("repo-tests") == "candidate-or-main"
 
