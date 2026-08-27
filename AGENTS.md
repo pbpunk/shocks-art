@@ -2,6 +2,7 @@
 
 - For production livestream Clips, Gemini interaction must occur only through the native Ask interaction on the YouTube page. Never wire direct Gemini API video analysis or repair into Clips Update, production routes, autonomous refresh, or reanalysis.
 - Preserve historical direct-Gemini AnalysisRun/CandidateWindow lineage for diagnosis during normal operation, but do not surface non-Ask candidates in the production Clips feed and do not let them suppress a replacement native-Ask import. A separately implemented destructive derived-data reinitialization may remove that historical working-database lineage only after explicit user approval, with a safety backup and canonical-source rebuild receipt.
+- During an explicitly approved derived-data reinitialization, unpublished/orphan `DerivedAsset` database rows may be cleared after a safety backup while referenced output files remain untouched; any `PublishingRecord` or `PerformanceRecord` lineage must still fail closed.
 - Keep Gemini bounded to the YouTube-native editorial interpretation path; local Searchable Media Memory indexing remains local-first.
 - Do not add recursive agent strategy loops to the MVP.
 - Preserve `Stream -> AnalysisRun -> CandidateWindow -> DerivedAsset -> PublishingRecord -> PerformanceRecord` lineage.
