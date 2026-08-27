@@ -21,7 +21,6 @@ def main() -> int:
     prompt, url, stream_id = load_job(args)
     out_path = args.out or default_response_path(url)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    # A failed rerun must never leave a prior response looking fresh to callers.
     if out_path.exists():
         out_path.unlink()
 
@@ -66,15 +65,12 @@ def load_job(args: argparse.Namespace) -> tuple[str, str, str | None]:
     stream_id = args.stream_id
     prompt = args.prompt or ""
     url = args.url or ""
-
     if args.prompt_file:
         prompt = args.prompt_file.read_text(encoding="utf-8")
-
     if args.app_url and args.stream_id and (not prompt or not url):
         job = fetch_native_prompt(args.app_url, args.stream_id)
         prompt = prompt or job["prompt"]
         url = url or job["url"]
-
     if not prompt:
         raise SystemExit("Provide --prompt, --prompt-file, or --app-url with --stream-id.")
     if not url:
@@ -96,7 +92,6 @@ def ask_youtube(url: str, prompt: str, profile_dir: Path, headless: bool, timeou
 
     profile_dir.mkdir(parents=True, exist_ok=True)
     failure_dir = DEFAULT_FAILURES / datetime.now().strftime("%Y%m%d_%H%M%S")
-
     with sync_playwright() as playwright:
         launch_options = {
             "user_data_dir": str(profile_dir),
@@ -110,8 +105,6 @@ def ask_youtube(url: str, prompt: str, profile_dir: Path, headless: bool, timeou
         stage = "navigate to the YouTube video"
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-            # YouTube maintains long-lived requests, so networkidle is not a valid
-            # readiness condition. DOMContentLoaded plus a visible page shell is.
             stage = "wait for the YouTube page shell"
             page.locator("body").wait_for(state="visible", timeout=30_000)
             stage = "wait for the YouTube Ask UI"
@@ -121,13 +114,10 @@ def ask_youtube(url: str, prompt: str, profile_dir: Path, headless: bool, timeou
             stage = "submit the Ask prompt"
             submit_prompt(page, prompt)
             stage = "wait for the Ask response"
-            response_text = wait_for_response(page, initial_text, timeout_seconds)
-            return response_text
+            return wait_for_response(page, initial_text, timeout_seconds)
         except PlaywrightTimeoutError as exc:
             save_failure_artifacts(page, failure_dir)
-            raise RuntimeError(
-                f"Timed out during {stage} while driving YouTube Ask. Failure artifacts: {failure_dir}"
-            ) from exc
+            raise RuntimeError(f"Timed out during {stage} while driving YouTube Ask. Failure artifacts: {failure_dir}") from exc
         except Exception:
             save_failure_artifacts(page, failure_dir)
             raise
@@ -154,11 +144,8 @@ def signed_out(page) -> bool:
 
 
 def ensure_ask_panel_open(page, timeout_seconds: int = 45) -> None:
-    """Wait for YouTube's asynchronously-rendered Ask UI and open it if needed."""
-
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
-        # Persistent Chrome profiles can restore the engagement panel already open.
         if ask_panel_is_open(page):
             return
         button = visible_ask_button(page)
@@ -172,7 +159,6 @@ def ensure_ask_panel_open(page, timeout_seconds: int = 45) -> None:
                 "Open the YouTube profile setup from the app, sign in, then run Native Ask again."
             )
         time.sleep(1)
-
     raise RuntimeError(
         f"YouTube Ask UI did not become available within {timeout_seconds} seconds; "
         "no visible Ask button or already-open Ask panel was found."
@@ -180,7 +166,6 @@ def ensure_ask_panel_open(page, timeout_seconds: int = 45) -> None:
 
 
 def click_ask_button(page) -> None:
-    """Compatibility alias for callers/tests using the historical helper name."""
     ensure_ask_panel_open(page)
 
 
@@ -193,7 +178,6 @@ def visible_ask_button(page):
                 return candidate
         except Exception:
             pass
-
     text_buttons = page.locator("button:has-text('Ask')")
     for index in range(text_buttons.count()):
         candidate = text_buttons.nth(index)
@@ -224,25 +208,38 @@ def ask_panel_text(page) -> str:
 
 
 def extract_appended_panel_text(initial_text: str, current_text: str) -> str:
-    """Return only text appended during this Ask turn.
+    """Return the new Ask turn while excluding conversation text already present.
 
-    YouTube can preserve prior Ask conversation text in a persistent browser profile.
-    Importing the whole panel would incorrectly stamp that prior content onto the
-    current Stream. Fail closed if the current panel is not an append-only extension
-    of the baseline captured immediately before submitting this prompt.
+    YouTube rewrites volatile controls/suggestions when a new turn starts, so the
+    entire panel is not reliably append-only. Preserve the unchanged leading lines
+    as the trusted baseline and return only the newly introduced tail. Fail closed
+    if too little of a non-trivial baseline survives to establish a safe boundary.
     """
-
     initial = initial_text.replace("\r\n", "\n").rstrip()
     current = current_text.replace("\r\n", "\n").rstrip()
     if not initial:
         return current.strip()
     if current == initial:
         return ""
-    if not current.startswith(initial):
+
+    initial_lines = initial.split("\n")
+    current_lines = current.split("\n")
+    prefix_lines = 0
+    for old, new in zip(initial_lines, current_lines):
+        if old != new:
+            break
+        prefix_lines += 1
+
+    stable_prefix = "\n".join(initial_lines[:prefix_lines]).strip()
+    baseline_size = max(1, len(initial.strip()))
+    stable_ratio = len(stable_prefix) / baseline_size
+    if len(initial_lines) >= 4 and stable_ratio < 0.5:
         raise RuntimeError(
-            "YouTube Ask panel changed non-append-only; refusing to import ambiguous or stale conversation context."
+            "YouTube Ask panel changed too much to isolate the current response safely; refusing to import ambiguous conversation context."
         )
-    return current[len(initial) :].strip()
+
+    delta = "\n".join(current_lines[prefix_lines:]).strip()
+    return delta
 
 
 def wait_for_response(page, initial_text: str, timeout_seconds: int) -> str:
@@ -250,8 +247,7 @@ def wait_for_response(page, initial_text: str, timeout_seconds: int) -> str:
     last_delta = ""
     stable_count = 0
     while time.time() < deadline:
-        text = ask_panel_text(page)
-        delta = extract_appended_panel_text(initial_text, text)
+        delta = extract_appended_panel_text(initial_text, ask_panel_text(page))
         if len(delta) > 400 and delta == last_delta:
             stable_count += 1
             if stable_count >= 3:
@@ -290,11 +286,7 @@ def default_response_path(url: str) -> Path:
 
 def import_response(app_url: str, stream_id: str, response_text: str) -> dict:
     payload = urllib.parse.urlencode(
-        {
-            "stream_id": stream_id,
-            "source": "native-youtube-gemini-sidebar-automated",
-            "response_text": response_text,
-        }
+        {"stream_id": stream_id, "source": "native-youtube-gemini-sidebar-automated", "response_text": response_text}
     ).encode("utf-8")
     request = urllib.request.Request(
         f"{app_url.rstrip('/')}/api/native/import",
