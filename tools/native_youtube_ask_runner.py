@@ -21,7 +21,6 @@ def main() -> int:
     prompt, url, stream_id = load_job(args)
     out_path = args.out or default_response_path(url)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    # A failed rerun must never leave a prior response looking fresh to callers.
     if out_path.exists():
         out_path.unlink()
 
@@ -66,15 +65,12 @@ def load_job(args: argparse.Namespace) -> tuple[str, str, str | None]:
     stream_id = args.stream_id
     prompt = args.prompt or ""
     url = args.url or ""
-
     if args.prompt_file:
         prompt = args.prompt_file.read_text(encoding="utf-8")
-
     if args.app_url and args.stream_id and (not prompt or not url):
         job = fetch_native_prompt(args.app_url, args.stream_id)
         prompt = prompt or job["prompt"]
         url = url or job["url"]
-
     if not prompt:
         raise SystemExit("Provide --prompt, --prompt-file, or --app-url with --stream-id.")
     if not url:
@@ -96,13 +92,8 @@ def ask_youtube(url: str, prompt: str, profile_dir: Path, headless: bool, timeou
 
     profile_dir.mkdir(parents=True, exist_ok=True)
     failure_dir = DEFAULT_FAILURES / datetime.now().strftime("%Y%m%d_%H%M%S")
-
     with sync_playwright() as playwright:
-        launch_options = {
-            "user_data_dir": str(profile_dir),
-            "headless": headless,
-            "viewport": {"width": 1440, "height": 1000},
-        }
+        launch_options = {"user_data_dir": str(profile_dir), "headless": headless, "viewport": {"width": 1440, "height": 1000}}
         if browser_channel:
             launch_options["channel"] = browser_channel
         context = playwright.chromium.launch_persistent_context(**launch_options)
@@ -110,8 +101,6 @@ def ask_youtube(url: str, prompt: str, profile_dir: Path, headless: bool, timeou
         stage = "navigate to the YouTube video"
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-            # YouTube maintains long-lived requests, so networkidle is not a valid
-            # readiness condition. DOMContentLoaded plus a visible page shell is.
             stage = "wait for the YouTube page shell"
             page.locator("body").wait_for(state="visible", timeout=30_000)
             stage = "open the YouTube Ask panel"
@@ -121,13 +110,10 @@ def ask_youtube(url: str, prompt: str, profile_dir: Path, headless: bool, timeou
             stage = "submit the Ask prompt"
             submit_prompt(page, prompt)
             stage = "wait for the Ask response"
-            response_text = wait_for_response(page, initial_text, timeout_seconds)
-            return response_text
+            return wait_for_response(page, initial_text, timeout_seconds)
         except PlaywrightTimeoutError as exc:
             save_failure_artifacts(page, failure_dir)
-            raise RuntimeError(
-                f"Timed out during {stage} while driving YouTube Ask. Failure artifacts: {failure_dir}"
-            ) from exc
+            raise RuntimeError(f"Timed out during {stage} while driving YouTube Ask. Failure artifacts: {failure_dir}") from exc
         except Exception:
             save_failure_artifacts(page, failure_dir)
             raise
@@ -146,25 +132,23 @@ def ask_panel_is_open(page) -> bool:
     return False
 
 
-def ensure_ask_panel_open(page) -> None:
-    # Persistent Chrome profiles can restore the engagement panel already open.
-    # That is a valid ready state; do not require an Ask button in that case.
-    if ask_panel_is_open(page):
-        return
-    button = visible_ask_button(page)
-    if not button:
+def ensure_ask_panel_open(page, timeout_seconds: float = 30.0, poll_seconds: float = 0.5) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if ask_panel_is_open(page):
+            return
+        button = visible_ask_button(page)
+        if button:
+            button.click(timeout=30_000)
+            page.get_by_text(ASK_PANEL_HEADING).wait_for(timeout=30_000)
+            return
         if page.get_by_role("link", name=re.compile(r"Sign in", re.I)).count() or page.get_by_role("button", name=re.compile(r"Sign in", re.I)).count():
-            raise RuntimeError(
-                "The automation browser profile is signed out, so YouTube Ask is not available. "
-                "Open the YouTube profile setup from the app, sign in, then run Native Ask again."
-            )
-        raise RuntimeError("Could not find a visible YouTube Ask button or an already-open Ask panel on this video page.")
-    button.click(timeout=30_000)
-    page.get_by_text(ASK_PANEL_HEADING).wait_for(timeout=30_000)
+            raise RuntimeError("The automation browser profile is signed out, so YouTube Ask is not available. Open the YouTube profile setup from the app, sign in, then run Native Ask again.")
+        time.sleep(poll_seconds)
+    raise RuntimeError("Timed out waiting for a visible YouTube Ask button or an already-open Ask panel on this video page.")
 
 
 def click_ask_button(page) -> None:
-    """Compatibility alias for callers/tests using the historical helper name."""
     ensure_ask_panel_open(page)
 
 
@@ -177,7 +161,6 @@ def visible_ask_button(page):
                 return candidate
         except Exception:
             pass
-
     text_buttons = page.locator("button:has-text('Ask')")
     for index in range(text_buttons.count()):
         candidate = text_buttons.nth(index)
@@ -197,25 +180,10 @@ def submit_prompt(page, prompt: str) -> None:
 
 
 def ask_panel_text(page) -> str:
-    return page.evaluate(
-        """() => {
-          const heading = Array.from(document.querySelectorAll('h1,h2,h3'))
-            .find((el) => /Ask about this video/i.test(el.textContent || ''));
-          const root = heading?.closest('ytd-engagement-panel-section-list-renderer, ytd-watch-flexy, body') || document.body;
-          return root.innerText || '';
-        }"""
-    )
+    return page.evaluate("""() => { const heading = Array.from(document.querySelectorAll('h1,h2,h3')).find((el) => /Ask about this video/i.test(el.textContent || '')); const root = heading?.closest('ytd-engagement-panel-section-list-renderer, ytd-watch-flexy, body') || document.body; return root.innerText || ''; }""")
 
 
 def extract_appended_panel_text(initial_text: str, current_text: str) -> str:
-    """Return only text appended during this Ask turn.
-
-    YouTube can preserve prior Ask conversation text in a persistent browser profile.
-    Importing the whole panel would incorrectly stamp that prior content onto the
-    current Stream. Fail closed if the current panel is not an append-only extension
-    of the baseline captured immediately before submitting this prompt.
-    """
-
     initial = initial_text.replace("\r\n", "\n").rstrip()
     current = current_text.replace("\r\n", "\n").rstrip()
     if not initial:
@@ -223,10 +191,8 @@ def extract_appended_panel_text(initial_text: str, current_text: str) -> str:
     if current == initial:
         return ""
     if not current.startswith(initial):
-        raise RuntimeError(
-            "YouTube Ask panel changed non-append-only; refusing to import ambiguous or stale conversation context."
-        )
-    return current[len(initial) :].strip()
+        raise RuntimeError("YouTube Ask panel changed non-append-only; refusing to import ambiguous or stale conversation context.")
+    return current[len(initial):].strip()
 
 
 def wait_for_response(page, initial_text: str, timeout_seconds: int) -> str:
@@ -234,8 +200,7 @@ def wait_for_response(page, initial_text: str, timeout_seconds: int) -> str:
     last_delta = ""
     stable_count = 0
     while time.time() < deadline:
-        text = ask_panel_text(page)
-        delta = extract_appended_panel_text(initial_text, text)
+        delta = extract_appended_panel_text(initial_text, ask_panel_text(page))
         if len(delta) > 400 and delta == last_delta:
             stable_count += 1
             if stable_count >= 3:
@@ -273,19 +238,8 @@ def default_response_path(url: str) -> Path:
 
 
 def import_response(app_url: str, stream_id: str, response_text: str) -> dict:
-    payload = urllib.parse.urlencode(
-        {
-            "stream_id": stream_id,
-            "source": "native-youtube-gemini-sidebar-automated",
-            "response_text": response_text,
-        }
-    ).encode("utf-8")
-    request = urllib.request.Request(
-        f"{app_url.rstrip('/')}/api/native/import",
-        data=payload,
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        method="POST",
-    )
+    payload = urllib.parse.urlencode({"stream_id": stream_id, "source": "native-youtube-gemini-sidebar-automated", "response_text": response_text}).encode("utf-8")
+    request = urllib.request.Request(f"{app_url.rstrip('/')}/api/native/import", data=payload, headers={"Content-Type": "application/x-www-form-urlencoded"}, method="POST")
     with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
 
