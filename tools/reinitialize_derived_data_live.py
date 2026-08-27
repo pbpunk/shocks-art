@@ -88,6 +88,29 @@ def protected_editorial_counts(counts: dict[str, int]) -> dict[str, int]:
     }
 
 
+def native_reseed_stream_ids(db, regression_stream_id: str | None) -> list[str]:
+    """Return native-Ask streams that must survive a clean rebuild or retry.
+
+    A partial reinitialization may leave a stream with a failed native AnalysisRun after
+    the original completed lineage has already been cleared. Including failed native
+    lineage prevents a retry from silently shrinking the intended reseed corpus.
+    """
+
+    stream_ids = list(
+        db.scalars(
+            select(AnalysisRun.stream_id)
+            .where(
+                AnalysisRun.status.in_(("complete", "failed")),
+                AnalysisRun.model.like(f"{NATIVE_ASK_MODEL_PREFIX}%"),
+            )
+            .distinct()
+        ).all()
+    )
+    if regression_stream_id is not None and regression_stream_id not in stream_ids:
+        stream_ids.append(regression_stream_id)
+    return stream_ids
+
+
 def backup_database(database_path: Path) -> str:
     if not database_path.is_file():
         raise RuntimeError("Configured SQLite database file does not exist")
@@ -202,21 +225,10 @@ def main() -> int:
                     3,
                 )
             stream_ids = list(db.scalars(select(Stream.stream_id)).all())
-            native_stream_ids = list(
-                db.scalars(
-                    select(AnalysisRun.stream_id)
-                    .where(
-                        AnalysisRun.status == "complete",
-                        AnalysisRun.model.like(f"{NATIVE_ASK_MODEL_PREFIX}%"),
-                    )
-                    .distinct()
-                ).all()
-            )
             regression_stream_id = db.scalar(
                 select(Stream.stream_id).where(Stream.source_video_id == TARGET_REGRESSION_VIDEO_ID)
             )
-            if regression_stream_id is not None and regression_stream_id not in native_stream_ids:
-                native_stream_ids.append(regression_stream_id)
+            native_stream_ids = native_reseed_stream_ids(db, regression_stream_id)
 
         queue_reset = clear_index_job_queue(queue_path)
         backup_name = backup_database(database_path)
