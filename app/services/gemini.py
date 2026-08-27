@@ -3,7 +3,12 @@ from pathlib import Path
 
 from app.core.config import ROOT_DIR, get_settings
 from app.models import Stream
-from app.services.transient_retry import call_with_transient_gemini_retry
+
+
+DIRECT_GEMINI_DISABLED_MESSAGE = (
+    "Direct Gemini API video analysis is disabled for Shocks Art Clips. "
+    "Production editorial analysis must use the native Ask interaction on the YouTube page."
+)
 
 
 EDITORIAL_PROMPT = """You are reviewing an archived Shocks Art livestream as an assistant editor.
@@ -73,6 +78,13 @@ Previous response:
 
 
 class GeminiAnalyzer:
+    """Legacy prompt/debug adapter with network interaction intentionally disabled.
+
+    Historical AnalysisRun/debug tooling still imports this class to render old prompts
+    and preserve lineage. The production app must never use it to contact Gemini; all
+    Clips interpretation now happens through YouTube's native Ask UI.
+    """
+
     def __init__(self, api_key: str, model: str, schema_version: str = "1.0") -> None:
         self.api_key = api_key
         self.model = model
@@ -92,42 +104,7 @@ class GeminiAnalyzer:
         )
 
     def analyze_stream(self, stream: Stream) -> str:
-        if not self.api_key:
-            raise RuntimeError("GEMINI_API_KEY is required for video analysis")
-
-        from google import genai
-
-        client = genai.Client(api_key=self.api_key)
-        prompt = self.build_analysis_prompt(stream)
-
-        def request() -> str:
-            if hasattr(client, "interactions"):
-                response = client.interactions.create(
-                    model=self.model,
-                    input=[
-                        {"type": "video", "uri": stream.url},
-                        {"type": "text", "text": prompt},
-                    ],
-                )
-                return getattr(response, "output_text", None) or getattr(response, "text", None) or ""
-
-            from google.genai import types
-
-            response = client.models.generate_content(
-                model=self.model,
-                contents=[
-                    types.Content(
-                        role="user",
-                        parts=[
-                            types.Part(text=prompt),
-                            types.Part(file_data=types.FileData(file_uri=stream.url, mime_type="video/mp4")),
-                        ],
-                    )
-                ],
-            )
-            return response.text or ""
-
-        return call_with_transient_gemini_retry(request, retries=get_settings().max_retries)
+        raise RuntimeError(DIRECT_GEMINI_DISABLED_MESSAGE)
 
     def build_repair_prompt(self, previous_response: str, validation_errors: list[str]) -> str:
         return REPAIR_PROMPT.format(
@@ -137,21 +114,7 @@ class GeminiAnalyzer:
         )
 
     def repair_response(self, previous_response: str, validation_errors: list[str]) -> str:
-        if not self.api_key:
-            raise RuntimeError("GEMINI_API_KEY is required for response repair")
-
-        from google import genai
-
-        client = genai.Client(api_key=self.api_key)
-
-        def request() -> str:
-            response = client.models.generate_content(
-                model=self.model,
-                contents=self.build_repair_prompt(previous_response, validation_errors),
-            )
-            return response.text or ""
-
-        return call_with_transient_gemini_retry(request, retries=get_settings().max_retries)
+        raise RuntimeError(DIRECT_GEMINI_DISABLED_MESSAGE)
 
 
 def raw_response_path(run_id: str) -> Path:

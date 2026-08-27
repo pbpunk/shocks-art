@@ -93,11 +93,11 @@ def test_prefixed_actions_redirect_with_prefix(client, monkeypatch):
     assert response.headers["location"].startswith("/shocks_art/pipeline?archive_status=error")
 
 
-def test_clips_home_includes_non_structured_candidates(client, db_session, valid_candidate_data):
-    candidate = create_candidate(db_session, valid_candidate_data, title="Newest Gemini Stream")
+def test_clips_home_excludes_non_native_candidates(client, db_session, valid_candidate_data):
+    candidate = create_candidate(db_session, valid_candidate_data, title="Legacy Direct Gemini Stream")
 
     response = client.get("/")
 
     assert response.status_code == 200
-    assert candidate.title in response.text
-    assert "Newest Gemini Stream" in response.text
+    assert candidate.title not in response.text
+    assert "Legacy Direct Gemini Stream" not in response.text
