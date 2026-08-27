@@ -5,8 +5,11 @@ from pathlib import Path
 
 import pytest
 
+from app.models import AnalysisRun, Stream
+from app.services.clips_native_ask import CLIPS_NATIVE_ASK_SOURCE
 from tools.reinitialize_derived_data_live import (
     clear_index_job_queue,
+    native_reseed_stream_ids,
     protected_editorial_counts,
     sqlite_database_path,
 )
@@ -27,6 +30,66 @@ def test_protected_editorial_state_fails_closed() -> None:
     assert protected_editorial_counts(
         {"derivedAssets": 2, "publishingRecords": 1, "performanceRecords": 0}
     ) == {"derivedAssets": 2, "publishingRecords": 1}
+
+
+def _stream(db_session, source_video_id: str) -> Stream:
+    stream = Stream(
+        platform="youtube",
+        channel_id="fixture_channel",
+        source_video_id=source_video_id,
+        title=f"Fixture {source_video_id}",
+        description="",
+        url=f"https://www.youtube.com/watch?v={source_video_id}",
+        published_at="2026-08-27T12:00:00Z",
+        duration=600,
+        thumbnail="",
+        processing_status="failed",
+        schema_version="1.0",
+    )
+    db_session.add(stream)
+    db_session.flush()
+    return stream
+
+
+def test_reseed_targets_include_failed_native_runs_after_partial_reset(db_session) -> None:
+    failed_native = _stream(db_session, "failed_native")
+    failed_legacy = _stream(db_session, "failed_legacy")
+    completed_native = _stream(db_session, "completed_native")
+    regression = _stream(db_session, "regression")
+
+    db_session.add_all(
+        [
+            AnalysisRun(
+                stream_id=failed_native.stream_id,
+                model=CLIPS_NATIVE_ASK_SOURCE,
+                prompt_version="fixture",
+                schema_version="1.0",
+                status="failed",
+            ),
+            AnalysisRun(
+                stream_id=failed_legacy.stream_id,
+                model="gemini-legacy",
+                prompt_version="fixture",
+                schema_version="1.0",
+                status="failed",
+            ),
+            AnalysisRun(
+                stream_id=completed_native.stream_id,
+                model=CLIPS_NATIVE_ASK_SOURCE,
+                prompt_version="fixture",
+                schema_version="1.0",
+                status="complete",
+            ),
+        ]
+    )
+    db_session.flush()
+
+    targets = set(native_reseed_stream_ids(db_session, regression.stream_id))
+
+    assert failed_native.stream_id in targets
+    assert completed_native.stream_id in targets
+    assert regression.stream_id in targets
+    assert failed_legacy.stream_id not in targets
 
 
 def _queue(path: Path, rows: list[tuple[str, str]]) -> None:
