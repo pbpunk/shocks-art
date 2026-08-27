@@ -6,12 +6,13 @@ from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
-from app.models import AnalysisRun, CandidateWindow, Stream
+from app.models import AnalysisRun, CandidateWindow, Stream, StreamTranscript
 from app.services.native_automation import (
     read_native_job_status,
     run_prompt_attempts,
     write_native_job_status,
 )
+from app.services.native_clip_grounding import ground_native_ask_transcript_evidence
 from app.services.native_youtube import (
     NATIVE_YOUTUBE_MODEL,
     NATIVE_YOUTUBE_PROMPT_VERSION,
@@ -106,8 +107,16 @@ def _native_duplicate(db: Session, stream: Stream, payload) -> CandidateWindow |
     )
 
 
+def _latest_stream_transcript(db: Session, stream: Stream) -> StreamTranscript | None:
+    return db.scalar(
+        select(StreamTranscript)
+        .where(StreamTranscript.stream_id == stream.stream_id)
+        .order_by(StreamTranscript.updated_at.desc(), StreamTranscript.created_at.desc())
+    )
+
+
 def save_clips_native_ask_response(db: Session, stream: Stream, response_text: str):
-    """Persist a YouTube Ask response as the only production Clips candidate source."""
+    """Persist a source-grounded YouTube Ask response for the production Clips feed."""
 
     run = AnalysisRun(
         stream_id=stream.stream_id,
@@ -126,13 +135,23 @@ def save_clips_native_ask_response(db: Session, stream: Stream, response_text: s
 
     try:
         response = parse_native_youtube_response(response_text, stream)
+        response = ground_native_ask_transcript_evidence(
+            response,
+            _latest_stream_transcript(db, stream),
+        )
         candidates: list[CandidateWindow] = []
         skipped_duplicates = 0
         for rank, payload in enumerate(response.candidates, start=1):
             if _native_duplicate(db, stream, payload):
                 skipped_duplicates += 1
                 continue
-            candidates.append(_candidate_from_payload(run, payload, rank))
+            candidate = _candidate_from_payload(run, payload, rank)
+            if any(
+                risk in {"caption_grounding_unavailable", "caption_claim_not_groundable"}
+                for risk in payload.risks
+            ):
+                candidate.review_status = "needs_verification"
+            candidates.append(candidate)
 
         db.add_all(candidates)
         run.status = "complete"
