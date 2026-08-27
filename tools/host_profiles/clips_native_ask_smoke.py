@@ -26,7 +26,7 @@ def git_revision(root: Path) -> str:
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "could not read live Git revision")
+        raise RuntimeError("could not read live Git revision")
     return result.stdout.strip().lower()
 
 
@@ -90,7 +90,7 @@ def main() -> int:
 
         health_status, _ = http_request(health_url)
         if health_status != 200:
-            return emit({"summary": f"Live app health returned HTTP {health_status}", "health_url": health_url}, 1)
+            return emit({"summary": f"Live app health returned HTTP {health_status}"}, 1)
 
         legacy_results: dict[str, int] = {}
         for path in ("/api/process", "/actions/process-one", "/api/streams/smoke/analyze"):
@@ -108,7 +108,7 @@ def main() -> int:
         python = live_python(live_root)
         helper = live_root / "tools" / "clips_native_ask_smoke_live.py"
         if not helper.is_file():
-            return emit({"summary": f"Live smoke helper is missing: {helper.name}"}, 1)
+            return emit({"summary": "Live native Ask smoke helper is missing"}, 1)
 
         result = subprocess.run(
             [str(python), str(helper)],
@@ -121,15 +121,14 @@ def main() -> int:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         stdout = result.stdout.strip()
-        stderr = result.stderr.strip()
         parsed: dict[str, Any] = {}
         if stdout:
             try:
                 parsed = json.loads(stdout.splitlines()[-1])
             except json.JSONDecodeError:
-                parsed = {"summary": "Live smoke helper returned non-JSON output", "stdout_tail": stdout[-4000:]}
-        if stderr:
-            parsed["stderr_tail"] = stderr[-4000:]
+                parsed = {"summary": "Live native Ask smoke helper returned non-JSON output"}
+        if result.stderr.strip():
+            parsed["helper_stderr_present"] = True
         if result.returncode != 0:
             parsed.setdefault("summary", f"Live native Ask smoke helper exited with code {result.returncode}")
             parsed["helper_exit_code"] = result.returncode
@@ -169,7 +168,6 @@ def main() -> int:
         parsed["live_revision"] = revision_after
         parsed["legacy_route_statuses"] = legacy_results
         parsed["production_feed_verified"] = True
-        parsed["browser_runtime"] = str(python)
         return emit(parsed)
     except subprocess.TimeoutExpired:
         return emit({"summary": "Native YouTube Ask smoke exceeded its fixed 900-second live-browser budget", "timed_out": True}, 124)
