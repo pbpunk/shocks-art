@@ -72,10 +72,9 @@ def test_extract_appended_panel_text_handles_rewritten_volatile_tail() -> None:
         "New suggested question"
     )
 
-    assert extract_appended_panel_text(initial, current).startswith(
-        "CURRENT ANSWER: Fractal Burning Process and Safety"
-    )
-    assert "OLD ANSWER" not in extract_appended_panel_text(initial, current)
+    delta = extract_appended_panel_text(initial, current)
+    assert delta.startswith("CURRENT ANSWER: Fractal Burning Process and Safety")
+    assert "OLD ANSWER" not in delta
 
 
 def test_extract_appended_panel_text_handles_empty_panel() -> None:
@@ -85,6 +84,6 @@ def test_extract_appended_panel_text_handles_empty_panel() -> None:
 def test_extract_appended_panel_text_rejects_unrelated_context_change() -> None:
     with pytest.raises(RuntimeError, match="too much"):
         extract_appended_panel_text(
-            "Ask about this video\nOLD ANSWER",
-            "Ask about a different video\nUNRELATED ANSWER",
+            "Ask about this video\nOLD ANSWER\nAI can make mistakes\nOld suggestion",
+            "Ask about a different video\nUNRELATED ANSWER\nDifferent controls\nDifferent suggestion",
         )
