@@ -9,8 +9,11 @@ from app.models import AnalysisRun, Stream
 from app.services.clips_native_ask import CLIPS_NATIVE_ASK_SOURCE
 from tools.reinitialize_derived_data_live import (
     clear_index_job_queue,
+    load_native_reseed_checkpoint,
     native_reseed_stream_ids,
     protected_editorial_counts,
+    resolve_native_reseed_stream_ids,
+    save_native_reseed_checkpoint,
     sqlite_database_path,
 )
 
@@ -90,6 +93,44 @@ def test_reseed_targets_include_failed_native_runs_after_partial_reset(db_sessio
     assert completed_native.stream_id in targets
     assert regression.stream_id in targets
     assert failed_legacy.stream_id not in targets
+
+
+def test_reseed_checkpoint_roundtrip(tmp_path: Path) -> None:
+    path = tmp_path / "targets.json"
+    save_native_reseed_checkpoint(["stream_a", "stream_b", "stream_a"], path)
+    assert load_native_reseed_checkpoint(path) == ["stream_a", "stream_b"]
+
+
+def test_reseed_targets_recover_from_backup_after_failure_before_clips(db_session, tmp_path: Path) -> None:
+    recovered = _stream(db_session, "recovered")
+    regression = _stream(db_session, "regression")
+    valid_stream_ids = {recovered.stream_id, regression.stream_id}
+
+    backup_dir = tmp_path / "backups"
+    backup_dir.mkdir()
+    backup = backup_dir / "shocks_art_before_reinitialize_20260827T200900Z.sqlite3"
+    with sqlite3.connect(backup) as connection:
+        connection.execute(
+            "CREATE TABLE analysis_runs (stream_id TEXT NOT NULL, model TEXT NOT NULL, status TEXT NOT NULL)"
+        )
+        connection.executemany(
+            "INSERT INTO analysis_runs(stream_id,model,status) VALUES (?,?,?)",
+            [
+                (recovered.stream_id, CLIPS_NATIVE_ASK_SOURCE, "complete"),
+                ("stale_stream", CLIPS_NATIVE_ASK_SOURCE, "complete"),
+                (regression.stream_id, "gemini-legacy", "complete"),
+            ],
+        )
+
+    targets = resolve_native_reseed_stream_ids(
+        db_session,
+        regression.stream_id,
+        valid_stream_ids,
+        checkpoint_path=tmp_path / "missing-checkpoint.json",
+        backup_dir=backup_dir,
+    )
+
+    assert targets == [recovered.stream_id, regression.stream_id]
 
 
 def _queue(path: Path, rows: list[tuple[str, str]]) -> None:
