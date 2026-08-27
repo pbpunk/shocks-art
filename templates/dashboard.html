@@ -2,17 +2,12 @@
 {% block content %}
 <section class="workspace-head">
   <div>
-    <p class="eyebrow">Archive extraction</p>
+    <p class="eyebrow">Archive intake</p>
     <h1>Livestream Pipeline</h1>
-    <p class="muted">Shocks Art streams move from archive intake to Gemini extraction, ranked candidate review, and export.</p>
+    <p class="muted">Shocks Art streams move from archive intake to native YouTube Ask review, ranked candidate review, and export. Production Clips never calls the Gemini API directly.</p>
   </div>
   <div class="actions">
     <form method="post" action="{{ url_path(request, '/actions/discover') }}"><button type="submit">Refresh Archive</button></form>
-    <form method="post" action="{{ url_path(request, '/actions/process-one') }}">
-      <button type="submit" {% if active_runs %}disabled{% endif %}>
-        {% if active_runs %}Extraction Running...{% else %}Extract Next Stream{% endif %}
-      </button>
-    </form>
     <a class="button secondary" href="{{ url_path(request, '/') }}">Clips</a>
     <a class="button secondary" href="{{ url_path(request, '/candidates') }}">Review Candidates</a>
   </div>
@@ -25,28 +20,18 @@
   </section>
 {% endif %}
 
-{% if active_runs %}
-  <section class="active-run" aria-live="polite">
-    <div class="spinner" aria-hidden="true"></div>
-    <div>
-      <h2>Analyzing {{ active_runs[0].stream.title }}</h2>
-      <p>Gemini is reviewing the livestream and selecting one source window. This page refreshes every 8 seconds while extraction is running.</p>
-    </div>
-  </section>
-{% endif %}
-
 {% if needs_verification_count %}
   <section class="notice warning-notice">
-    <strong>{{ needs_verification_count }} candidate windows need manual verification.</strong>
-    <span>They were generated before the video-access probe was added or have reviewer-flagged evidence. Verify in YouTube/native Gemini before using them.</span>
+    <strong>{{ needs_verification_count }} historical candidate windows need manual verification.</strong>
+    <span>Production Clips now surfaces only native YouTube Ask candidates; historical direct-analysis rows remain available here for diagnosis and lineage.</span>
   </section>
 {% endif %}
 
 <section class="metrics">
   <div><span>{{ stream_count }}</span><small>archive streams</small></div>
-  <div><span>{{ statuses.get("queued", 0) }}</span><small>awaiting extraction</small></div>
+  <div><span>{{ statuses.get("queued", 0) }}</span><small>awaiting YouTube Ask</small></div>
   <div><span>{{ statuses.get("processing", 0) }}</span><small>in progress</small></div>
-  <div><span>{{ candidate_count }}</span><small>ranked windows</small></div>
+  <div><span>{{ candidate_count }}</span><small>historical windows</small></div>
   <div><span>{{ statuses.get("failed", 0) + statuses.get("quarantined", 0) }}</span><small>needs attention</small></div>
   <div><span>{{ approved_count }}</span><small>approved</small></div>
 </section>
@@ -55,7 +40,7 @@
   <div>
     <div class="section-head">
       <h2>Archive Status</h2>
-      <span class="muted">{{ settings.gemini_model }} / prompt {{ settings.prompt_version }}</span>
+      <span class="muted">Production Clips: native YouTube Ask only</span>
     </div>
     <div class="table">
       <div class="table-row table-head">
@@ -77,7 +62,7 @@
 
   <div>
     <div class="section-head">
-      <h2>Top Candidates</h2>
+      <h2>Historical Top Candidates</h2>
       <a href="{{ url_path(request, '/candidates') }}">View all</a>
     </div>
     <div class="stack">
@@ -100,13 +85,13 @@
 <section class="runs-panel">
   <div class="section-head">
     <h2>Recent Extraction Runs</h2>
-    <span class="muted">Every attempt keeps its status and error reason.</span>
+    <span class="muted">Historical runs retain their original model/source for provenance.</span>
   </div>
   <div class="table">
     <div class="table-row runs-head">
       <span>Stream</span>
       <span>Run Status</span>
-      <span>Model</span>
+      <span>Source</span>
       <span>Result</span>
     </div>
     {% for run in recent_runs %}
@@ -120,7 +105,7 @@
           {% elif run.status == "complete" %}
             Candidate saved
           {% elif run.status == "processing" %}
-            Working...
+            Historical run still marked processing
           {% else %}
             Waiting for response
           {% endif %}
