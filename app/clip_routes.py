@@ -1,8 +1,8 @@
 from threading import Lock
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, BackgroundTasks, Depends
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
@@ -26,6 +26,11 @@ LEGACY_DIRECT_GEMINI_DETAIL = (
     "Direct Gemini video analysis is disabled for Shocks Art Clips. "
     "Use Clips Update, which analyzes the YouTube page through its native Ask interaction."
 )
+LEGACY_DIRECT_ROUTE_PATHS = {
+    "/api/process",
+    "/actions/process-one",
+    "/api/streams/{stream_id}/analyze",
+}
 
 
 def url_path(request: Request, path: str) -> str:
@@ -218,11 +223,20 @@ def refresh_streams_action(
     return local_redirect(request, f"/?{query}")
 
 
-def _is_legacy_direct_gemini_path(path: str) -> bool:
-    normalized = path.rstrip("/")
-    if normalized.endswith("/api/process") or normalized.endswith("/actions/process-one"):
-        return True
-    return "/api/streams/" in normalized and normalized.endswith("/analyze")
+@router.post("/api/process")
+def legacy_process_disabled():
+    raise HTTPException(status_code=410, detail=LEGACY_DIRECT_GEMINI_DETAIL)
+
+
+@router.post("/actions/process-one")
+def legacy_process_one_disabled():
+    raise HTTPException(status_code=410, detail=LEGACY_DIRECT_GEMINI_DETAIL)
+
+
+@router.post("/api/streams/{stream_id}/analyze")
+def legacy_stream_analyze_disabled(stream_id: str):
+    del stream_id
+    raise HTTPException(status_code=410, detail=LEGACY_DIRECT_GEMINI_DETAIL)
 
 
 def register_clip_routes() -> None:
@@ -239,11 +253,17 @@ def register_clip_routes() -> None:
     # Clips without deleting their historical lineage from the database.
     main_module.structured_clip_candidates = production_clip_candidates
 
-    @app.middleware("http")
-    async def block_legacy_direct_gemini_routes(request: Request, call_next):
-        if request.method.upper() == "POST" and _is_legacy_direct_gemini_path(request.scope.get("path", "")):
-            return JSONResponse(status_code=410, content={"detail": LEGACY_DIRECT_GEMINI_DETAIL})
-        return await call_next(request)
+    # The legacy direct-analysis endpoints are declared in app.main before lifespan
+    # startup. Remove those route objects before adding the 410 replacements above.
+    # This avoids installing middleware after Starlette has begun startup.
+    app.router.routes[:] = [
+        route
+        for route in app.router.routes
+        if not (
+            getattr(route, "path", None) in LEGACY_DIRECT_ROUTE_PATHS
+            and "POST" in (getattr(route, "methods", set()) or set())
+        )
+    ]
 
     app.include_router(router)
     app.state.clip_routes_registered = True
