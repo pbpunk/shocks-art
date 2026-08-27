@@ -9,18 +9,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from sqlalchemy import func, select
-
-from app.core.database import SessionLocal
-from app.models import AnalysisRun, CandidateWindow, Stream
-from app.services.clips_native_ask import (
-    CLIPS_NATIVE_ASK_SOURCE,
-    NATIVE_ASK_MODEL_PREFIX,
-    pending_native_ask_streams,
-    production_candidate_ids,
-    run_clips_native_ask,
-)
-
 PREFERRED_REGRESSION_VIDEO_ID = "pDC14ymQqWY"
 
 
@@ -29,28 +17,47 @@ def emit(payload: dict[str, Any], code: int = 0) -> int:
     return code
 
 
-def select_target_stream(streams: list[Stream]) -> Stream | None:
+def select_target_stream(streams: list[Any]) -> Any | None:
     for stream in streams:
         if stream.source_video_id == PREFERRED_REGRESSION_VIDEO_ID:
             return stream
     return streams[0] if streams else None
 
 
-def direct_run_count(db, stream_id: str) -> int:
-    return int(
-        db.scalar(
-            select(func.count())
-            .select_from(AnalysisRun)
-            .where(
-                AnalysisRun.stream_id == stream_id,
-                ~AnalysisRun.model.like(f"{NATIVE_ASK_MODEL_PREFIX}%"),
-            )
-        )
-        or 0
-    )
+def safe_job_receipt(result: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: result.get(key)
+        for key in ("status", "message", "source", "returncode", "attempt")
+        if key in result
+    }
 
 
 def main() -> int:
+    from sqlalchemy import func, select
+
+    from app.core.database import SessionLocal
+    from app.models import AnalysisRun, CandidateWindow
+    from app.services.clips_native_ask import (
+        CLIPS_NATIVE_ASK_SOURCE,
+        NATIVE_ASK_MODEL_PREFIX,
+        pending_native_ask_streams,
+        production_candidate_ids,
+        run_clips_native_ask,
+    )
+
+    def direct_run_count(db, stream_id: str) -> int:
+        return int(
+            db.scalar(
+                select(func.count())
+                .select_from(AnalysisRun)
+                .where(
+                    AnalysisRun.stream_id == stream_id,
+                    ~AnalysisRun.model.like(f"{NATIVE_ASK_MODEL_PREFIX}%"),
+                )
+            )
+            or 0
+        )
+
     with SessionLocal() as db:
         target = select_target_stream(pending_native_ask_streams(db))
         if target is None:
@@ -68,6 +75,7 @@ def main() -> int:
         before_direct_runs = direct_run_count(db, stream_id)
 
     result = run_clips_native_ask(stream_id)
+    safe_job = safe_job_receipt(result)
     if result.get("status") != "complete":
         return emit(
             {
@@ -75,7 +83,7 @@ def main() -> int:
                 "stream_id": stream_id,
                 "source_video_id": source_video_id,
                 "preferred_regression_target": preferred_target,
-                "job": result,
+                "job": safe_job,
             },
             1,
         )
@@ -88,7 +96,7 @@ def main() -> int:
                 "summary": "YouTube Ask smoke completed without a durable AnalysisRun and at least one new candidate",
                 "stream_id": stream_id,
                 "source_video_id": source_video_id,
-                "job": result,
+                "job": safe_job,
             },
             1,
         )
