@@ -168,12 +168,15 @@ def clear_visual_artifacts(index_root: Path) -> bool:
 
 def clear_derived_database_state(db) -> None:
     # Order is explicit so the reset is safe even when SQLite FK enforcement is enabled.
+    # Media is a derived catalog representation: source files, Streams, raw captions,
+    # credentials, and browser/account state are preserved outside this deletion.
     db.execute(delete(StreamAnalysisArtifact))
     db.execute(delete(CandidateWindow))
     db.execute(delete(AnalysisRun))
     db.execute(delete(Embedding))
     db.execute(delete(Trace))
     db.execute(delete(IndexRun))
+    db.execute(delete(Media))
     db.execute(update(Stream).values(processing_status="queued"))
     db.commit()
 
@@ -290,6 +293,12 @@ def main() -> int:
                 ]
 
         failures: list[str] = []
+        if after["streams"] != before["streams"]:
+            failures.append(f"canonical Stream count changed during reset: {before['streams']} -> {after['streams']}")
+        if after["streamTranscripts"] != before["streamTranscripts"]:
+            failures.append(
+                f"canonical StreamTranscript count changed during reset: {before['streamTranscripts']} -> {after['streamTranscripts']}"
+            )
         if direct_after != 0:
             failures.append(f"legacy/direct Gemini AnalysisRuns remain after reset: {direct_after}")
         if stale_title_count:
@@ -316,10 +325,12 @@ def main() -> int:
             "native_streams_reseeded": clip_results,
             "native_stream_failures": clip_failures,
             "regression_candidates": regression_candidates,
-            "protected_source_state": {
-                "streams": after["streams"],
-                "streamTranscripts": after["streamTranscripts"],
-                "media": after["media"],
+            "canonical_source_records": {
+                "streams_before": before["streams"],
+                "streams_after": after["streams"],
+                "streamTranscripts_before": before["streamTranscripts"],
+                "streamTranscripts_after": after["streamTranscripts"],
+                "rebuiltMedia": after["media"],
             },
         }
         if failures:
