@@ -123,8 +123,8 @@ def clear_index_job_queue(queue_path: Path) -> dict[str, int]:
             raise RuntimeError(f"Refusing destructive reset while {running} indexing job(s) are running")
         total = int(connection.execute("SELECT COUNT(*) FROM index_jobs").fetchone()[0])
         connection.execute("DELETE FROM index_jobs")
-        if "index_worker_lease" in tables:
-            connection.execute("DELETE FROM index_worker_lease")
+        # Keep the worker lease intact. The running indexer can remain healthy and
+        # will simply observe an empty queue after this transaction commits.
         connection.execute("COMMIT")
         return {"removedJobs": total, "runningJobs": 0}
     except Exception:
@@ -209,9 +209,11 @@ def main() -> int:
                     .distinct()
                 ).all()
             )
-            regression_stream = db.scalar(select(Stream).where(Stream.source_video_id == TARGET_REGRESSION_VIDEO_ID))
-            if regression_stream is not None and regression_stream.stream_id not in native_stream_ids:
-                native_stream_ids.append(regression_stream.stream_id)
+            regression_stream_id = db.scalar(
+                select(Stream.stream_id).where(Stream.source_video_id == TARGET_REGRESSION_VIDEO_ID)
+            )
+            if regression_stream_id is not None and regression_stream_id not in native_stream_ids:
+                native_stream_ids.append(regression_stream_id)
 
         queue_reset = clear_index_job_queue(queue_path)
         backup_name = backup_database(database_path)
@@ -273,7 +275,7 @@ def main() -> int:
                 func.lower(CandidateWindow.title) == FORBIDDEN_STALE_TITLE.lower(),
             )
             regression_candidates: list[dict[str, Any]] = []
-            if regression_stream is not None:
+            if regression_stream_id is not None:
                 regression_candidates = [
                     {
                         "title": candidate.title,
@@ -282,7 +284,7 @@ def main() -> int:
                     }
                     for candidate in db.scalars(
                         select(CandidateWindow)
-                        .where(CandidateWindow.stream_id == regression_stream.stream_id)
+                        .where(CandidateWindow.stream_id == regression_stream_id)
                         .order_by(CandidateWindow.candidate_rank)
                     ).all()
                 ]
@@ -296,7 +298,7 @@ def main() -> int:
             failures.append(f"{stream_sync.transcript_errors} stored transcript(s) could not be rebuilt into Language Traces")
         if clip_failures:
             failures.append(f"{len(clip_failures)} previously-native stream(s) failed native-Ask reseeding")
-        if regression_stream is not None and not regression_candidates:
+        if regression_stream_id is not None and not regression_candidates:
             failures.append("Fractal Burning regression stream has no fresh candidate windows after reinitialization")
 
         payload: dict[str, Any] = {
