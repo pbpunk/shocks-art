@@ -61,6 +61,16 @@ Runs a bounded repeated indexing/retrieval validation profile for workstation so
 
 The initial v1 profile records repeated indexing-related test passes, disk free-space delta, and available GPU-memory observations. IDX-042 still requires stronger restart/recovery/contention evidence before it can be closed.
 
+### `clips-native-ask-smoke`
+
+Runs one real production Clips analysis through the logged-in YouTube page's native Ask interaction. This profile is `main-only`: it requires the deployed live checkout to equal the exact requested `origin/main` SHA before it will touch production state.
+
+The live helper prioritizes the reported regression stream `pDC14ymQqWY` when that stream is still pending native Ask; otherwise it selects the newest stream that has no completed native-Ask AnalysisRun. It runs exactly one stream through the same `run_clips_native_ask()` service used by Clips Update. The Sheet cannot provide a stream ID, YouTube URL, browser profile, prompt, command, or reanalysis flag.
+
+Acceptance requires a completed `native-youtube-gemini-sidebar-clips-update` AnalysisRun, at least one persisted CandidateWindow in the production Clips feed, an unchanged non-native/direct-Gemini run count for the selected stream, HTTP 410 from the legacy direct-Gemini production routes, and an unchanged exact live Git revision. Receipts omit browser paths, prompts, video URLs, and other host-local execution details.
+
+If every discovered stream already has a completed native-Ask run, the profile fails closed rather than silently reanalyzing completed footage. A new pending stream or an explicitly designed bounded reanalysis fixture is required for another real browser exercise.
+
 ### `repo-tests`
 
 Runs the repository's complete `pytest -q` suite at the exact requested SHA using a workstation Python runtime that already has the app and test dependencies. The Sheet cannot select a test file, marker, module, command, Python path, or pytest argument.
