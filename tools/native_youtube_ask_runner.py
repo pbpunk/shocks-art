@@ -107,17 +107,27 @@ def ask_youtube(url: str, prompt: str, profile_dir: Path, headless: bool, timeou
             launch_options["channel"] = browser_channel
         context = playwright.chromium.launch_persistent_context(**launch_options)
         page = context.pages[0] if context.pages else context.new_page()
+        stage = "navigate to the YouTube video"
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60_000)
-            page.wait_for_load_state("networkidle", timeout=30_000)
+            # YouTube maintains long-lived requests, so networkidle is not a valid
+            # readiness condition. DOMContentLoaded plus a visible page shell is.
+            stage = "wait for the YouTube page shell"
+            page.locator("body").wait_for(state="visible", timeout=30_000)
+            stage = "open the YouTube Ask panel"
             ensure_ask_panel_open(page)
+            stage = "capture the Ask-panel baseline"
             initial_text = ask_panel_text(page)
+            stage = "submit the Ask prompt"
             submit_prompt(page, prompt)
+            stage = "wait for the Ask response"
             response_text = wait_for_response(page, initial_text, timeout_seconds)
             return response_text
         except PlaywrightTimeoutError as exc:
             save_failure_artifacts(page, failure_dir)
-            raise RuntimeError(f"Timed out while driving YouTube Ask. Failure artifacts: {failure_dir}") from exc
+            raise RuntimeError(
+                f"Timed out during {stage} while driving YouTube Ask. Failure artifacts: {failure_dir}"
+            ) from exc
         except Exception:
             save_failure_artifacts(page, failure_dir)
             raise
