@@ -1,10 +1,13 @@
-from app.models import AnalysisRun, CandidateWindow, Stream
+import pytest
+
+from app.models import AnalysisRun, Stream
 from app.services.clips_native_ask import (
     CLIPS_NATIVE_ASK_SOURCE,
     pending_native_ask_streams,
     production_clip_candidates,
     save_clips_native_ask_response,
 )
+from app.services.gemini import GeminiAnalyzer
 from app.services.native_youtube import _candidate_from_payload, parse_native_youtube_response
 
 
@@ -129,3 +132,13 @@ def test_legacy_direct_gemini_http_routes_are_gone(client):
         response = client.post(path, follow_redirects=False)
         assert response.status_code == 410
         assert "Direct Gemini video analysis is disabled" in response.json()["detail"]
+
+
+def test_direct_gemini_analyzer_cannot_contact_network(db_session):
+    stream = make_stream(db_session, source_video_id="network_guard")
+    analyzer = GeminiAnalyzer("pretend-api-key", "gemini-3.1-flash-lite")
+
+    with pytest.raises(RuntimeError, match="Direct Gemini API video analysis is disabled"):
+        analyzer.analyze_stream(stream)
+    with pytest.raises(RuntimeError, match="Direct Gemini API video analysis is disabled"):
+        analyzer.repair_response("{}", ["fixture error"])
