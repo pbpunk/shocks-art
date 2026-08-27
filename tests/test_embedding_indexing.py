@@ -34,6 +34,25 @@ class FakeEmbeddingBackend:
         return vectors
 
 
+class FailingChunkBackend(FakeEmbeddingBackend):
+    def __init__(self, *, fail_on_call: int, **kwargs):
+        super().__init__(**kwargs)
+        self.fail_on_call = fail_on_call
+
+    def embed_images(self, image_paths):
+        paths = [Path(path) for path in image_paths]
+        self.calls.append(paths)
+        if len(self.calls) == self.fail_on_call:
+            raise EmbeddingBackendError("fixture chunk timeout")
+        vectors = []
+        for index, _path in enumerate(paths, start=1):
+            vector = [float(index), 2.0, 3.0, 4.0][: self.dimension]
+            if len(vector) < self.dimension:
+                vector.extend([1.0] * (self.dimension - len(vector)))
+            vectors.append(vector)
+        return vectors
+
+
 def make_session(tmp_path):
     engine = create_engine(f"sqlite:///{tmp_path / 'embedding.db'}")
     Base.metadata.create_all(bind=engine)
@@ -107,6 +126,57 @@ def test_visual_embeddings_are_normalized_persisted_and_reused(tmp_path):
             assert len(vector) == 4
             norm = sum(value * value for value in vector) ** 0.5
             assert norm == pytest.approx(1.0, abs=1e-6)
+    finally:
+        db.close()
+
+
+def test_visual_embedding_chunks_persist_and_resume_after_later_failure(tmp_path):
+    db = make_session(tmp_path)
+    try:
+        traces = []
+        index_root = None
+        for index in range(5):
+            trace, root = add_visual_trace(
+                db,
+                tmp_path,
+                filename=f"chunk-{index}.jpg",
+                timestamp_ms=100 + index,
+            )
+            traces.append(trace)
+            index_root = root
+        assert index_root is not None
+
+        failing = FailingChunkBackend(fail_on_call=2)
+        with pytest.raises(EmbeddingBackendError, match="chunk 2/3"):
+            index_visual_trace_embeddings(
+                db,
+                index_root=index_root,
+                backend=failing,
+                chunk_size=2,
+                max_attempts_per_chunk=1,
+            )
+
+        persisted_after_failure = list(db.scalars(select(Embedding)).all())
+        assert len(persisted_after_failure) == 2
+        assert len(failing.calls) == 2
+        assert [len(call) for call in failing.calls] == [2, 2]
+
+        resumed = FakeEmbeddingBackend(model_id=failing.model_id, dimension=failing.dimension)
+        result = index_visual_trace_embeddings(
+            db,
+            index_root=index_root,
+            backend=resumed,
+            chunk_size=2,
+            max_attempts_per_chunk=1,
+        )
+
+        assert result.considered == 5
+        assert result.reused == 2
+        assert result.created == 3
+        assert [len(call) for call in resumed.calls] == [2, 1]
+        final_rows = list(db.scalars(select(Embedding)).all())
+        assert len(final_rows) == 5
+        assert {row.trace_id for row in final_rows} == {trace.trace_id for trace in traces}
     finally:
         db.close()
 
