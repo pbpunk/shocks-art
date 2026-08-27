@@ -48,13 +48,13 @@ def _queue(path: Path, rows: list[tuple[str, str]]) -> None:
         )
 
 
-def test_queue_reset_clears_nonrunning_jobs_and_lease(tmp_path: Path) -> None:
+def test_queue_reset_clears_nonrunning_jobs_but_keeps_worker_lease(tmp_path: Path) -> None:
     path = tmp_path / "jobs.sqlite3"
     _queue(path, [("one", "queued"), ("two", "completed")])
     assert clear_index_job_queue(path) == {"removedJobs": 2, "runningJobs": 0}
     with sqlite3.connect(path) as connection:
         assert connection.execute("SELECT COUNT(*) FROM index_jobs").fetchone()[0] == 0
-        assert connection.execute("SELECT COUNT(*) FROM index_worker_lease").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM index_worker_lease").fetchone()[0] == 1
 
 
 def test_queue_reset_refuses_running_job(tmp_path: Path) -> None:
