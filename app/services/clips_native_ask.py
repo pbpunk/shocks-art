@@ -178,15 +178,24 @@ def save_clips_native_ask_response(db: Session, stream: Stream, response_text: s
         db.flush()
         return run, candidates, skipped_duplicates
     except Exception as exc:
-        # A failed flush poisons the SQLAlchemy transaction. Roll it back before
-        # attempting any subsequent write. SQLite lock errors are left transient so
-        # the caller can retry the exact same already-returned Ask response.
-        db.rollback()
-        if not _is_sqlite_locked(exc):
-            refreshed = db.get(Stream, stream.stream_id)
-            if refreshed is not None:
-                refreshed.processing_status = "failed"
-                db.flush()
+        # Only poisoned DB transactions require rollback. Ordinary parse/grounding
+        # rejections retain the original failure bookkeeping semantics in the same
+        # transaction so callers can inspect the failed run/stream state.
+        locked = _is_sqlite_locked(exc)
+        if locked or not db.is_active:
+            db.rollback()
+            if not locked:
+                refreshed = db.get(Stream, stream.stream_id)
+                if refreshed is not None:
+                    refreshed.processing_status = "failed"
+                    db.flush()
+        else:
+            run.status = "failed"
+            run.request_completed_at = datetime.now(timezone.utc)
+            run.exception_message = str(exc)
+            run.validation_errors = [str(exc)]
+            stream.processing_status = "failed"
+            db.flush()
         raise
 
 
