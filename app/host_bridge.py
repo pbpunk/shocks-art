@@ -13,6 +13,7 @@ HOST_PROFILES: Final[tuple[str, ...]] = (
     "indexer-soak",
     "clips-native-ask-smoke",
     "clips-native-ask-rerun",
+    "derived-data-reinitialize",
     "repo-tests",
 )
 HOST_PROFILE_POLICIES: Final[dict[str, str]] = {
@@ -21,6 +22,7 @@ HOST_PROFILE_POLICIES: Final[dict[str, str]] = {
     "indexer-soak": "main-only",
     "clips-native-ask-smoke": "main-only",
     "clips-native-ask-rerun": "main-only",
+    "derived-data-reinitialize": "main-only",
     "repo-tests": "candidate-or-main",
 }
 VERIFICATION_HEADERS: Final[tuple[str, ...]] = (
