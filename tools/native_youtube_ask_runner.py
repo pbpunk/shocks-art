@@ -13,6 +13,7 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 DEFAULT_PROFILE = ROOT_DIR / "data" / "browser_profile"
 DEFAULT_RESPONSES = ROOT_DIR / "data" / "native_youtube_responses"
 DEFAULT_FAILURES = ROOT_DIR / "data" / "automation_failures"
+ASK_PANEL_HEADING = re.compile(r"Ask about this video", re.I)
 
 
 def main() -> int:
@@ -20,6 +21,9 @@ def main() -> int:
     prompt, url, stream_id = load_job(args)
     out_path = args.out or default_response_path(url)
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    # A failed rerun must never leave a prior response looking fresh to callers.
+    if out_path.exists():
+        out_path.unlink()
 
     try:
         response_text = ask_youtube(
@@ -106,7 +110,7 @@ def ask_youtube(url: str, prompt: str, profile_dir: Path, headless: bool, timeou
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=60_000)
             page.wait_for_load_state("networkidle", timeout=30_000)
-            click_ask_button(page)
+            ensure_ask_panel_open(page)
             initial_text = ask_panel_text(page)
             submit_prompt(page, prompt)
             response_text = wait_for_response(page, initial_text, timeout_seconds)
@@ -121,7 +125,22 @@ def ask_youtube(url: str, prompt: str, profile_dir: Path, headless: bool, timeou
             context.close()
 
 
-def click_ask_button(page) -> None:
+def ask_panel_is_open(page) -> bool:
+    headings = page.get_by_text(ASK_PANEL_HEADING)
+    for index in range(headings.count()):
+        try:
+            if headings.nth(index).is_visible(timeout=1000):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def ensure_ask_panel_open(page) -> None:
+    # Persistent Chrome profiles can restore the engagement panel already open.
+    # That is a valid ready state; do not require an Ask button in that case.
+    if ask_panel_is_open(page):
+        return
     button = visible_ask_button(page)
     if not button:
         if page.get_by_role("link", name=re.compile(r"Sign in", re.I)).count() or page.get_by_role("button", name=re.compile(r"Sign in", re.I)).count():
@@ -129,9 +148,14 @@ def click_ask_button(page) -> None:
                 "The automation browser profile is signed out, so YouTube Ask is not available. "
                 "Open the YouTube profile setup from the app, sign in, then run Native Ask again."
             )
-        raise RuntimeError("Could not find a visible YouTube Ask button on this video page.")
+        raise RuntimeError("Could not find a visible YouTube Ask button or an already-open Ask panel on this video page.")
     button.click(timeout=30_000)
-    page.get_by_text(re.compile(r"Ask about this video", re.I)).wait_for(timeout=30_000)
+    page.get_by_text(ASK_PANEL_HEADING).wait_for(timeout=30_000)
+
+
+def click_ask_button(page) -> None:
+    """Compatibility alias for callers/tests using the historical helper name."""
+    ensure_ask_panel_open(page)
 
 
 def visible_ask_button(page):
