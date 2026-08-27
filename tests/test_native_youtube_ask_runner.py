@@ -57,6 +57,23 @@ def test_extract_appended_panel_text_excludes_prior_conversation() -> None:
     assert extract_appended_panel_text(initial, current) == "CURRENT ANSWER: Fractal Burning Process and Safety"
 
 
+def test_extract_appended_panel_text_allows_bounded_trailing_ui_churn() -> None:
+    stable_history = (
+        "Ask about this video\n"
+        "OLD ANSWER: Studio Tour and Finished Pieces\n"
+        + ("old conversation detail " * 30)
+        + "\nAI can make mistakes, so double-check it.\n"
+    )
+    initial = stable_history + "Old suggested question one\nOld suggested question two\nAsk Gemini"
+    current = stable_history + "CURRENT PROMPT\nCURRENT ANSWER: Fractal Burning Process and Safety"
+
+    delta = extract_appended_panel_text(initial, current)
+
+    assert "CURRENT ANSWER: Fractal Burning Process and Safety" in delta
+    assert "Studio Tour and Finished Pieces" not in delta
+    assert "old conversation detail" not in delta
+
+
 def test_extract_appended_panel_text_handles_empty_panel() -> None:
     assert extract_appended_panel_text("", "CURRENT ANSWER") == "CURRENT ANSWER"
 
