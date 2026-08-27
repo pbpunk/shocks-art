@@ -1,6 +1,9 @@
+import json
+
 import pytest
 
-from app.models import AnalysisRun, Stream
+from app.models import AnalysisRun, Stream, StreamTranscript
+from app.services.candidate_evidence import CandidateEvidenceValidationError
 from app.services.clips_native_ask import (
     CLIPS_NATIVE_ASK_SOURCE,
     pending_native_ask_streams,
@@ -29,6 +32,27 @@ Estimated Short Count: 2
 Possible Opening Lines: "Here is what finally changed."
 Usefulness Score: 90
 Component Scores: Pillar: 95, Hook: 88, Clarity: 92, Visuals: 82, Audio: 90, Impact: 95, Education: 80, Entertainment: 80, Potential: 90, Brand: 92, Confidence: 92
+"""
+
+
+GLUING_RESPONSE = """
+1. Gluing the Celebrity Sign (00:46 - 06:17)
+Rank: 1
+Duration: 5:31
+Primary Pillar: Artistic process
+Summary: Nate demonstrates positioning and gluing laser-cut letters onto a backing board.
+Why It Is Useful: The section shows a complete visible process.
+Tags: artistic process, sign making
+Transcript Evidence: "Now, we have a bunch of letters and what I'm going to do is I'm going to kind of lay them out before I glue them because that is the smart thing to do." (00:46)
+Visual Evidence: Nate lays out and glues letters on the sign (00:46-06:17).
+Completeness Check: Begins with layout, develops the gluing process, and ends after the letters are positioned.
+Window Type: source_window
+Chatter Risk: low
+Exact Caption Quote: Now, we have a bunch of letters and what I'm going to do is I'm going to kind of lay them out before I glue them because that is the smart thing to do.
+Estimated Short Count: 1
+Possible Opening Lines: "Today we are gluing up this custom sign."
+Usefulness Score: 89
+Component Scores: Pillar: 90, Hook: 84, Clarity: 91, Visuals: 92, Audio: 88, Impact: 80, Education: 88, Entertainment: 82, Potential: 89, Brand: 91, Confidence: 93
 """
 
 
@@ -62,6 +86,30 @@ def add_run(db_session, stream, model, status="complete"):
     db_session.add(run)
     db_session.flush()
     return run
+
+
+def _event(seconds, text, duration_ms=3000):
+    return {"tStartMs": seconds * 1000, "dDurationMs": duration_ms, "segs": [{"utf8": text}]}
+
+
+def _add_transcript(db_session, stream, tmp_path, events):
+    raw = tmp_path / f"{stream.source_video_id}.en-orig.json3"
+    raw.write_text(json.dumps({"events": events}), encoding="utf-8")
+    transcript = StreamTranscript(
+        stream_id=stream.stream_id,
+        language="en",
+        source="youtube_auto_captions",
+        format="json3",
+        text=" ".join(
+            segment.get("utf8", "")
+            for event in events
+            for segment in event.get("segs", [])
+        ),
+        raw_location=str(raw),
+    )
+    db_session.add(transcript)
+    db_session.flush()
+    return transcript
 
 
 def test_direct_gemini_complete_stream_is_still_pending_for_youtube_ask(db_session):
@@ -99,6 +147,62 @@ def test_native_ask_import_is_not_suppressed_by_matching_direct_gemini_candidate
     assert len(native_candidates) == 1
     assert native_run.model == CLIPS_NATIVE_ASK_SOURCE
     assert native_candidates[0].candidate_window_id != direct_candidate.candidate_window_id
+    assert native_candidates[0].review_status == "needs_verification"
+    assert native_candidates[0].transcript_excerpt == "No verified in-window transcript evidence"
+
+
+def test_native_ask_replaces_model_timestamp_with_real_caption_timestamp(db_session, tmp_path):
+    stream = make_stream(db_session, source_video_id="E9F-vEbmZpg")
+    quote = (
+        "Now, we have a bunch of letters and what I'm going to do is I'm going to kind of lay them out "
+        "before I glue them because that is the smart thing to do."
+    )
+    _add_transcript(
+        db_session,
+        stream,
+        tmp_path,
+        [
+            _event(90, "unrelated shop chatter inside the candidate window"),
+            _event(180, quote),
+        ],
+    )
+
+    _, candidates, skipped = save_clips_native_ask_response(db_session, stream, GLUING_RESPONSE)
+    db_session.commit()
+
+    assert skipped == 0
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.start_seconds == 46
+    assert candidate.end_seconds == 377
+    assert candidate.transcript_evidence[0]["seconds"] == 180
+    assert candidate.transcript_evidence[0]["timestamp"] == "00:03:00"
+    assert quote in candidate.transcript_evidence[0]["text"]
+    assert candidate.transcript_excerpt.endswith("(00:03:00)")
+    assert candidate.emergent_observations["_transcript_evidence_grounding"]["source"] == "stored_json3_captions"
+
+
+def test_native_ask_rejects_quote_found_only_outside_proposed_window(db_session, tmp_path):
+    stream = make_stream(db_session, source_video_id="E9F-vEbmZpg")
+    quote = (
+        "Now, we have a bunch of letters and what I'm going to do is I'm going to kind of lay them out "
+        "before I glue them because that is the smart thing to do."
+    )
+    _add_transcript(
+        db_session,
+        stream,
+        tmp_path,
+        [
+            _event(90, "unrelated shop chatter inside the candidate window"),
+            _event(720, quote),
+        ],
+    )
+
+    with pytest.raises(CandidateEvidenceValidationError, match="could not be grounded inside the proposed candidate window"):
+        save_clips_native_ask_response(db_session, stream, GLUING_RESPONSE)
+
+    assert stream.processing_status == "failed"
+    assert not stream.candidates
 
 
 def test_production_clip_candidates_exclude_direct_gemini_lineage(db_session):
