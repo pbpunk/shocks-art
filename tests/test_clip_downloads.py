@@ -2,6 +2,7 @@ from pathlib import Path
 
 from app.models import DerivedAsset
 from app.services.clip_download import generate_clip_file, read_progress
+from app.services.clips_native_ask import CLIPS_NATIVE_ASK_SOURCE
 from tests.test_ranking_exports_api import create_candidate
 
 
@@ -157,7 +158,9 @@ def test_generate_clip_file_reuses_valid_source_cache(db_session, valid_candidat
 
 
 def test_clips_page_renders_generate_download_button(client, db_session, valid_candidate_data):
-    create_candidate(db_session, valid_candidate_data)
+    candidate = create_candidate(db_session, valid_candidate_data)
+    candidate.analysis_run.model = CLIPS_NATIVE_ASK_SOURCE
+    db_session.commit()
 
     response = client.get("/")
 
