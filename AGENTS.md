@@ -1,11 +1,13 @@
 # Agent Instructions
 
-- Keep Gemini bounded to video interpretation and repair.
+- For production livestream Clips, Gemini interaction must occur only through the native Ask interaction on the YouTube page. Never wire direct Gemini API video analysis or repair into Clips Update, production routes, autonomous refresh, or reanalysis.
+- Preserve historical direct-Gemini AnalysisRun/CandidateWindow lineage for diagnosis, but do not surface non-Ask candidates in the production Clips feed and do not let them suppress a replacement native-Ask import.
+- Keep Gemini bounded to the YouTube-native editorial interpretation path; local Searchable Media Memory indexing remains local-first.
 - Do not add recursive agent strategy loops to the MVP.
 - Preserve `Stream -> AnalysisRun -> CandidateWindow -> DerivedAsset -> PublishingRecord -> PerformanceRecord` lineage.
 - Update schema versions when changing structured output.
 - Use tests with mocked external APIs by default.
-- Do not reanalyze completed streams unless the user explicitly asks for that feature.
+- Do not reanalyze completed native-Ask streams unless the user explicitly asks for that feature.
 - Treat host-only evidence as an execution-location problem, not as a reason to require an interactive Codex session.
 - Autonomous workstation requests must use the Shock's Art GPT Bridge fixed-profile contract in `docs/google-host-control.md`.
 - Autonomous production updates must use the exact-`origin/main` `Updates` contract in `docs/google-update-control.md`; never invent another remote execution path.
