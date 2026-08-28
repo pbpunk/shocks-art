@@ -10,6 +10,10 @@ from pathlib import Path
 from typing import Any
 
 
+REQUEST_READ_RETRY_SECONDS = 2.0
+REQUEST_READ_RETRY_INTERVAL_SECONDS = 0.02
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Persistent isolated Qwen3-VL query worker")
     parser.add_argument("--qwen-repo", required=True, type=Path)
@@ -28,6 +32,19 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
     temporary = path.with_suffix(path.suffix + ".tmp")
     temporary.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
     temporary.replace(path)
+
+
+def _read_published_json(path: Path) -> Any:
+    """Read an atomically-published request, tolerating brief Windows sharing locks."""
+
+    deadline = time.monotonic() + REQUEST_READ_RETRY_SECONDS
+    while True:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(REQUEST_READ_RETRY_INTERVAL_SECONDS)
 
 
 def _torch_dtype(torch: Any, name: str) -> Any:
@@ -151,7 +168,7 @@ def main() -> int:
             request_id = request_path.stem
             response_path = responses_dir / f"{request_id}.json"
             try:
-                payload = json.loads(request_path.read_text(encoding="utf-8"))
+                payload = _read_published_json(request_path)
                 if not isinstance(payload, dict):
                     raise ValueError("request payload must be an object")
                 if payload.get("generationId") != args.generation_id:
