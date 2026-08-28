@@ -15,6 +15,7 @@ HOST_PROFILES: Final[tuple[str, ...]] = (
     "clips-native-ask-rerun",
     "derived-data-reinitialize",
     "derived-data-resume",
+    "retrieval-quality",
     "repo-tests",
 )
 HOST_PROFILE_POLICIES: Final[dict[str, str]] = {
@@ -25,6 +26,7 @@ HOST_PROFILE_POLICIES: Final[dict[str, str]] = {
     "clips-native-ask-rerun": "main-only",
     "derived-data-reinitialize": "main-only",
     "derived-data-resume": "main-only",
+    "retrieval-quality": "main-only",
     "repo-tests": "candidate-or-main",
 }
 VERIFICATION_HEADERS: Final[tuple[str, ...]] = (
