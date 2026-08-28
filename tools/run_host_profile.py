@@ -20,6 +20,7 @@ PROFILE_SCRIPTS = {
     "clips-native-ask-rerun": ROOT / "tools" / "host_profiles" / "clips_native_ask_rerun.py",
     "derived-data-reinitialize": ROOT / "tools" / "host_profiles" / "derived_data_reinitialize.py",
     "derived-data-resume": ROOT / "tools" / "host_profiles" / "derived_data_resume.py",
+    "retrieval-quality": ROOT / "tools" / "host_profiles" / "retrieval_quality.py",
     "repo-tests": ROOT / "tools" / "host_profiles" / "repo_tests.py",
 }
 
@@ -28,6 +29,7 @@ PROFILE_TIMEOUT_SECONDS = {
     "private-youtube-probe": 900,
     "clips-native-ask-smoke": 1200,
     "clips-native-ask-rerun": 1200,
+    "retrieval-quality": 2400,
     "indexer-soak": 1800,
     "derived-data-reinitialize": 7200,
     "derived-data-resume": 7200,
