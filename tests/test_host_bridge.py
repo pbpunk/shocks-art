@@ -24,6 +24,7 @@ def test_host_profiles_are_fixed_and_narrow() -> None:
         "clips-native-ask-rerun",
         "derived-data-reinitialize",
         "derived-data-resume",
+        "retrieval-quality",
         "repo-tests",
     )
     assert set(HOST_PROFILE_POLICIES) == set(HOST_PROFILES)
@@ -32,6 +33,7 @@ def test_host_profiles_are_fixed_and_narrow() -> None:
     assert profile_policy("clips-native-ask-rerun") == "main-only"
     assert profile_policy("derived-data-reinitialize") == "main-only"
     assert profile_policy("derived-data-resume") == "main-only"
+    assert profile_policy("retrieval-quality") == "main-only"
     assert profile_policy("whisper-benchmark") == "candidate-or-main"
     assert profile_policy("repo-tests") == "candidate-or-main"
 
