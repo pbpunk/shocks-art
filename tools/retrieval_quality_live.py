@@ -7,7 +7,7 @@ from typing import Any
 from app.core.database import SessionLocal
 from app.indexing.embeddings import EmbeddingBackendError
 from app.indexing.language_search import search_language_traces
-from app.indexing.qwen_backend import QwenSubprocessEmbeddingBackend
+from app.indexing.qwen_query_backend import QwenPersistentQueryEmbeddingBackend
 from app.indexing.visual_search import search_visual_embeddings
 
 
@@ -63,7 +63,7 @@ def _visual_payload(result) -> dict[str, Any]:
 def main() -> int:
     started = time.perf_counter()
     try:
-        backend = QwenSubprocessEmbeddingBackend()
+        backend = QwenPersistentQueryEmbeddingBackend()
         query_started = time.perf_counter()
         query_vectors = backend.embed_text([text for _, text in EVAL_QUERIES])
         query_embedding_ms = (time.perf_counter() - query_started) * 1000.0
@@ -93,13 +93,14 @@ def main() -> int:
                 )
 
         payload = {
-            "schemaVersion": 1,
+            "schemaVersion": 2,
             "summary": f"Full-stream retrieval baseline completed for {len(rows)} fixed queries",
             "queryCount": len(rows),
             "topK": TOP_K,
             "queryEmbeddingMs": round(query_embedding_ms, 4),
             "elapsedMs": round((time.perf_counter() - started) * 1000.0, 4),
             "modelId": backend.model_id,
+            "queryRuntime": "persistent-isolated-worker",
             "scoringIsolation": {
                 "languageUsesTraceTextOnly": True,
                 "visualUsesPersistedEmbeddingsOnly": True,
