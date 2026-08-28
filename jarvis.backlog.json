@@ -7,7 +7,7 @@
   "repository": "https://github.com/pbpunk/shocks-art",
   "status": "active",
   "authoritative": true,
-  "updatedAt": "2026-08-27",
+  "updatedAt": "2026-08-28",
   "goal": "Find -> Judge -> Pull -> Edit: semantic search returns useful named, spoken, visual, and silent footage with inspectable provenance; production Clips are derived only from YouTube native Ask.",
   "executionLegend": {
     "github": "Repository implementation/tests.",
@@ -64,6 +64,11 @@
       "id": "K-010",
       "title": "Current derived data is provisional",
       "detail": "The existing local/Library/Clips derived state predates the corrected architecture and is scheduled for explicit user-approved reinitialization after this backlog reconciliation."
+    },
+    {
+      "id": "K-011",
+      "title": "Interactive Qwen query runtime proven",
+      "detail": "Exact deployed main 8186f45dab4b4981f3417d8aec5672225cd93e9a reused the persistent isolated Qwen worker across retrieval-quality invocations: five-query embedding fell from 279,987 ms on the completing cold pass to 704 ms warm, while model identity, rankings/scores, and metadata isolation remained unchanged."
     }
   ],
   "unknowns": [
@@ -90,12 +95,6 @@
       "title": "Long-duration lifecycle",
       "detail": "A bounded restart/recovery/contention soak still needs a valid PASS.",
       "resolutionItems": ["IDX-042"]
-    },
-    {
-      "id": "U-005",
-      "title": "Interactive semantic-query latency",
-      "detail": "One-shot Qwen query startup has dominated observed search time; persistent query inference must be measured.",
-      "resolutionItems": ["IDX-046"]
     },
     {
       "id": "U-006",
@@ -176,7 +175,7 @@
     {"id":"IDX-043","phase":"workflow","title":"Integrate semantic result moments with source pull/open/editing actions","status":"todo","execution":"github","priority":"P2","required":true,"dependsOn":["IDX-034","IDX-038","IDX-042","IDX-046"],"acceptance":["A semantic result can open surrounding footage or materialize useful source/range without exposing storage complexity."]},
     {"id":"IDX-044","phase":"workflow","title":"Validate Find -> Judge -> Pull -> Edit on mobile and desktop","status":"todo","execution":"both","priority":"P0","required":true,"dependsOn":["IDX-043"],"acceptance":["A real user can retrieve, judge, and pull useful footage without knowing filename/date/source; mobile usage is practical."]},
     {"id":"IDX-045","phase":"operations","title":"Restore and guard production Clips native YouTube Ask workflow","status":"done","execution":"both","priority":"P0","required":true,"dependsOn":[],"acceptance":["Clips Update and production Clips candidates use only YouTube's native Ask interaction.","Direct Gemini video-analysis production routes are disabled and historical non-Ask candidates are excluded from the production feed.","A main-only real-browser host smoke passes on exact deployed main without increasing the direct-Gemini run count."],"evidence":["PR #7 restored production Clips to native YouTube Ask only and hard-disabled legacy direct-Gemini production routes.","PR #8 added main-only clips-native-ask-smoke. Exact deployed main 6c805f923c591967a0adaaf39f15a7112a41e254 passed 190/190 repo tests.","Live host smoke on regression stream pDC14ymQqWY passed: 3 production native-Ask candidates, production feed verified, direct-Gemini run count unchanged 4 -> 4, and all legacy direct-analysis routes returned HTTP 410."]},
-    {"id":"IDX-046","phase":"operations","title":"Eliminate interactive semantic-query cold-start latency","status":"todo","execution":"both","priority":"P1","required":true,"dependsOn":["IDX-020","IDX-040"],"acceptance":["Semantic text-query inference uses a persistent isolated runtime instead of loading Qwen for every request.","Interactive query latency is measured separately from SQLite retrieval and is practical for normal Library use.","FastAPI remains isolated from the GPU/ML stack."]},
+    {"id":"IDX-046","phase":"operations","title":"Eliminate interactive semantic-query cold-start latency","status":"done","execution":"both","priority":"P1","required":true,"dependsOn":["IDX-020","IDX-040"],"acceptance":["Semantic text-query inference uses a persistent isolated runtime instead of loading Qwen for every request.","Interactive query latency is measured separately from SQLite retrieval and is practical for normal Library use.","FastAPI remains isolated from the GPU/ML stack."],"evidence":["PR #29 added the persistent isolated Qwen query runtime; PRs #31 and #32 hardened Windows file IPC and versioned resident-worker lifecycle. Final deployed main is 8186f45dab4b4981f3417d8aec5672225cd93e9a.","Exact-main workstation suite passed 227/227; deployment receipt qwen-query-protocol-ipc-deploy-8186f45d completed as updated_exact with State.host_revision matching the exact SHA.","Live cold-completion receipt retrieval-quality-protocol-second-8186f45d measured queryEmbeddingMs 279987.1706 and elapsedMs 421174.5755. Immediate warm receipt retrieval-quality-protocol-warm-8186f45d measured queryEmbeddingMs 704.2648 and elapsedMs 14913.5918, about a 398x embedding speedup.","Cold and warm receipts used the same Qwen model generation and identical five-query rankings/scores; filename, title, and source path remained excluded from semantic scoring."]},
     {"id":"IDX-047","phase":"operations","title":"Reinitialize derived prototype data from canonical sources","status":"todo","execution":"codex","priority":"P0","required":true,"dependsOn":["IDX-045"],"acceptance":["Only derived/prototype data is cleared; source/archive media and credentials are preserved.","Rebuild begins from canonical YouTube/local sources under the corrected architecture.","Old direct-Gemini candidate lineage is retained only if explicitly preserved for diagnostic provenance; production-derived state is rebuilt cleanly.","This item requires explicit user go-ahead before destructive host execution."]}
   ]
 }
