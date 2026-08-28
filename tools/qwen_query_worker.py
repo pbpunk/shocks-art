@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 
+WORKER_PROTOCOL_VERSION = 1
 REQUEST_READ_RETRY_SECONDS = 2.0
 REQUEST_READ_RETRY_INTERVAL_SECONDS = 0.02
 
@@ -24,6 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=12)
     parser.add_argument("--generation-id", required=True)
     parser.add_argument("--dimension", required=True, type=int)
+    parser.add_argument("--protocol-version", required=True, type=int)
     return parser.parse_args()
 
 
@@ -125,6 +127,7 @@ def main() -> int:
                 "pid": os.getpid(),
                 "generationId": args.generation_id,
                 "dimension": args.dimension,
+                "workerProtocolVersion": WORKER_PROTOCOL_VERSION,
                 "startedAtEpoch": started,
                 "heartbeatEpoch": time.time(),
                 "error": error[:2000],
@@ -133,6 +136,10 @@ def main() -> int:
 
     write_status("loading")
     try:
+        if args.protocol_version != WORKER_PROTOCOL_VERSION:
+            raise RuntimeError(
+                f"Qwen query worker protocol mismatch: expected {WORKER_PROTOCOL_VERSION}, got {args.protocol_version}"
+            )
         qwen_repo = args.qwen_repo.resolve()
         model_dir = args.model_dir.resolve()
         if not (qwen_repo / "src" / "models" / "qwen3_vl_embedding.py").is_file():
@@ -173,6 +180,8 @@ def main() -> int:
                     raise ValueError("request payload must be an object")
                 if payload.get("generationId") != args.generation_id:
                     raise ValueError("request generation does not match the loaded model")
+                if int(payload.get("workerProtocolVersion", 0)) != WORKER_PROTOCOL_VERSION:
+                    raise ValueError("request protocol does not match the loaded worker")
                 operation, items = _items(payload)
                 vectors: list[list[float]] = []
                 for offset in range(0, len(items), args.batch_size):
@@ -195,6 +204,7 @@ def main() -> int:
                         "operation": operation,
                         "generationId": args.generation_id,
                         "dimension": args.dimension,
+                        "workerProtocolVersion": WORKER_PROTOCOL_VERSION,
                         "vectors": vectors,
                     },
                 )
@@ -205,11 +215,15 @@ def main() -> int:
                         "ok": False,
                         "requestId": request_id,
                         "generationId": args.generation_id,
+                        "workerProtocolVersion": WORKER_PROTOCOL_VERSION,
                         "error": f"{type(exc).__name__}: {exc}",
                     },
                 )
             finally:
-                request_path.unlink(missing_ok=True)
+                try:
+                    request_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
     except Exception as exc:
         failed = True
         write_status("failed", error=f"{type(exc).__name__}: {exc}")
