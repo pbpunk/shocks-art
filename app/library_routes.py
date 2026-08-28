@@ -16,7 +16,7 @@ from app.core.config import get_settings
 from app.core.database import get_db
 from app.indexing.embeddings import EmbeddingBackendError
 from app.indexing.environment import collect_indexing_environment
-from app.indexing.qwen_backend import QwenSubprocessEmbeddingBackend
+from app.indexing.qwen_query_backend import QwenPersistentQueryEmbeddingBackend
 from app.indexing.service import (
     VisualExtractionConfig,
     effective_sample_interval_seconds,
@@ -197,7 +197,7 @@ def library_visual_search(
     payload: VisualSearchRequest,
     db: Session = Depends(get_db),
 ):
-    """Embed a text query in the isolated Qwen runtime and rank persisted visual vectors.
+    """Embed a text query in the persistent isolated Qwen runtime and rank persisted visual vectors.
 
     Filename/title metadata is joined only after semantic scoring and is never an
     input to the query embedding or cosine rank.
@@ -208,7 +208,7 @@ def library_visual_search(
         raise HTTPException(status_code=422, detail="query must not be blank")
 
     try:
-        backend = QwenSubprocessEmbeddingBackend()
+        backend = QwenPersistentQueryEmbeddingBackend()
         query_started = time.perf_counter()
         vectors = backend.embed_text([semantic_query])
         query_embedding_ms = (time.perf_counter() - query_started) * 1000.0
