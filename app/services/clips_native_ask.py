@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import SessionLocal
 from app.models import AnalysisRun, CandidateWindow, Stream, StreamTranscript
+from app.services.candidate_evidence import CandidateEvidenceValidationError
 from app.services.native_automation import (
     read_native_job_status,
     run_prompt_attempts,
@@ -128,6 +129,45 @@ def _is_sqlite_locked(exc: Exception) -> bool:
     return False
 
 
+def _ground_native_candidates_individually(response, transcript):
+    """Ground each native-Ask candidate independently and quarantine bad proposals.
+
+    A single hallucinated/ambiguous candidate must not discard other candidates from
+    the same immutable Ask response that independently pass source-caption grounding.
+    The raw response remains attached to the AnalysisRun for audit. If every candidate
+    fails grounding, preserve the fail-closed stream behavior.
+    """
+
+    grounded = []
+    rejected_errors: list[str] = []
+    rejected_count = 0
+    response_type = type(response)
+
+    for payload in response.candidates:
+        single = response_type(
+            schema_version=response.schema_version,
+            stream_id=response.stream_id,
+            source_video_id=response.source_video_id,
+            candidates=[payload],
+        )
+        try:
+            single = ground_native_ask_transcript_evidence(single, transcript)
+        except CandidateEvidenceValidationError as exc:
+            rejected_count += 1
+            rejected_errors.extend(exc.errors)
+            continue
+        grounded.extend(single.candidates)
+
+    if not grounded:
+        raise CandidateEvidenceValidationError(
+            rejected_errors or ["All native Ask candidates failed source-caption grounding"]
+        )
+
+    response.candidates = grounded
+    response.candidate = None
+    return response, rejected_count, rejected_errors
+
+
 def save_clips_native_ask_response(db: Session, stream: Stream, response_text: str):
     """Persist a source-grounded YouTube Ask response for the production Clips feed."""
 
@@ -148,7 +188,7 @@ def save_clips_native_ask_response(db: Session, stream: Stream, response_text: s
         run.raw_response_location = str(raw_path)
 
         response = parse_native_youtube_response(response_text, stream)
-        response = ground_native_ask_transcript_evidence(
+        response, rejected_candidates, rejected_errors = _ground_native_candidates_individually(
             response,
             _latest_stream_transcript(db, stream),
         )
@@ -169,9 +209,15 @@ def save_clips_native_ask_response(db: Session, stream: Stream, response_text: s
         db.add_all(candidates)
         run.status = "complete"
         run.request_completed_at = datetime.now(timezone.utc)
+        run.validation_errors = rejected_errors
+        notes: list[str] = []
+        if rejected_candidates:
+            notes.append(f"quarantined {rejected_candidates} ungroundable candidate(s)")
+        if skipped_duplicates:
+            notes.append(f"skipped {skipped_duplicates} native duplicate(s)")
         run.exception_message = (
-            f"Imported {len(candidates)} candidate(s); skipped {skipped_duplicates} native duplicate(s)."
-            if skipped_duplicates
+            f"Imported {len(candidates)} candidate(s); " + "; ".join(notes) + "."
+            if notes
             else ""
         )
         stream.processing_status = "complete"
