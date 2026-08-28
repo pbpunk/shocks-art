@@ -258,6 +258,55 @@ def test_native_ask_rejects_hallucinated_global_quote(db_session, tmp_path):
     assert not stream.candidates
 
 
+def test_native_ask_quarantines_bad_candidate_without_discarding_good_candidate(db_session, tmp_path):
+    stream = make_stream(db_session, source_video_id="E9F-vEbmZpg")
+    quote = (
+        "Now, we have a bunch of letters and what I'm going to do is I'm going to kind of lay them out "
+        "before I glue them because that is the smart thing to do."
+    )
+    _add_transcript(
+        db_session,
+        stream,
+        tmp_path,
+        [
+            _event(90, "unrelated shop chatter inside the candidate window"),
+            _event(180, quote),
+            _event(760, "actual later captions discuss sanding and finishing"),
+        ],
+    )
+    response = GLUING_RESPONSE + """
+
+2. Imaginary Later Process (11:40 - 13:20)
+Rank: 2
+Duration: 1:40
+Primary Pillar: Artistic process
+Summary: A second process supposedly happens later.
+Why It Is Useful: It would be useful if the claimed speech were real.
+Tags: artistic process
+Transcript Evidence: "the moon laser is calibrated for dragon steel" (12:00).
+Visual Evidence: Nate works in the shop (11:40-13:20).
+Completeness Check: Claimed complete process.
+Window Type: source_window
+Chatter Risk: low
+Exact Caption Quote: the moon laser is calibrated for dragon steel
+Estimated Short Count: 1
+Possible Opening Lines: "Here is the next step."
+Usefulness Score: 80
+Component Scores: Pillar: 85, Hook: 75, Clarity: 80, Visuals: 80, Audio: 80, Impact: 70, Education: 75, Entertainment: 70, Potential: 80, Brand: 80, Confidence: 85
+"""
+
+    run, candidates, skipped = save_clips_native_ask_response(db_session, stream, response)
+    db_session.commit()
+
+    assert skipped == 0
+    assert run.status == "complete"
+    assert len(candidates) == 1
+    assert candidates[0].title == "Gluing the Celebrity Sign"
+    assert run.validation_errors
+    assert "quarantined 1 ungroundable candidate" in run.exception_message
+    assert stream.processing_status == "complete"
+
+
 def test_production_clip_candidates_exclude_direct_gemini_lineage(db_session):
     stream = make_stream(db_session)
     parsed = parse_native_youtube_response(ASK_RESPONSE, stream)
