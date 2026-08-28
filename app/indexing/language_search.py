@@ -13,6 +13,26 @@ from app.library_models import Trace
 
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+(?:'[a-z0-9]+)?", re.IGNORECASE)
+_QUERY_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "at",
+        "by",
+        "for",
+        "from",
+        "in",
+        "into",
+        "of",
+        "on",
+        "onto",
+        "or",
+        "the",
+        "to",
+        "with",
+    }
+)
 DEFAULT_WINDOW_RADIUS_MS = 15000
 DEFAULT_MAX_WINDOW_MS = 35000
 
@@ -93,6 +113,12 @@ def tokenize_language_query(value: str) -> tuple[str, ...]:
     return tuple(token.casefold() for token in _TOKEN_RE.findall(str(value or "")))
 
 
+def searchable_language_query_tokens(value: str) -> tuple[str, ...]:
+    raw = tokenize_language_query(value)
+    filtered = tuple(token for token in raw if token not in _QUERY_STOPWORDS)
+    return filtered or raw
+
+
 def _build_candidate_windows(
     documents: list[_Document],
     query_terms: set[str],
@@ -161,8 +187,6 @@ def _coverage_multiplier(query_tokens: tuple[str, ...], counts: Counter[str]) ->
     if not unique_terms or not covered:
         return 0.0
     coverage = covered / len(unique_terms)
-    # Multi-concept creator queries should prefer one coherent temporal neighborhood
-    # containing the whole request over isolated single-word caption fragments.
     return 0.55 + (1.45 * coverage * coverage)
 
 
@@ -189,19 +213,20 @@ def search_language_traces(
 ) -> LanguageSearchResult:
     """Rank coherent caption neighborhoods with metadata-isolated lexical scoring.
 
-    Only Language Trace content participates in scoring. A query-term-bearing caption
-    event seeds a bounded temporal neighborhood on the same Media item; adjacent
-    caption text is concatenated so concepts spoken a few seconds apart can rank as
-    one useful moment. Coverage and compactness prefer windows that satisfy multiple
-    query concepts together. Media titles, filenames, paths, and source metadata are
-    deliberately absent from scoring.
+    Only Language Trace content participates in scoring. Query stopwords are removed
+    before matching so grammatical glue cannot outrank creator concepts. A query-term-
+    bearing caption event seeds a bounded temporal neighborhood on the same Media item;
+    adjacent caption text is concatenated so concepts spoken a few seconds apart can
+    rank as one useful moment. Distinct concept coverage is the primary rank key, then
+    BM25-style relevance and compactness break ties. Media titles, filenames, paths,
+    and source metadata are deliberately absent from scoring.
     """
 
     if top_k <= 0:
         raise ValueError("top_k must be greater than zero")
     if window_radius_ms <= 0 or max_window_ms <= 0:
         raise ValueError("language search window bounds must be positive")
-    query_tokens = tokenize_language_query(query)
+    query_tokens = searchable_language_query_tokens(query)
     if not query_tokens:
         raise ValueError("query must contain at least one searchable token")
 
@@ -273,9 +298,15 @@ def search_language_traces(
                 )
             )
 
-    matches.sort(key=lambda match: (-match.score, match.media_id, match.start_ms, match.trace_id))
-    # Overlapping seeded windows from the same moment are near-duplicates. Keep only
-    # the strongest local window so top-K represents distinct editing neighborhoods.
+    matches.sort(
+        key=lambda match: (
+            -len(match.matched_terms),
+            -match.score,
+            match.media_id,
+            match.start_ms,
+            match.trace_id,
+        )
+    )
     distinct: list[LanguageSearchMatch] = []
     for match in matches:
         if any(
