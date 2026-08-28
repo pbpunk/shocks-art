@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import time
 import uuid
@@ -86,6 +85,11 @@ class QwenPersistentQueryEmbeddingBackend:
         if self._status_ready(status):
             return
 
+        startup_deadline = time.monotonic() + self.startup_timeout_seconds
+        if status.get("state") == "loading" and status.get("generationId") == self.model_id:
+            self._wait_ready(startup_deadline)
+            return
+
         # Ask an old/mismatched generation to exit before loading the requested one.
         if status.get("state") in {"loading", "ready"} and status.get("generationId") != self.model_id:
             self.stop_path.write_text("stop\n", encoding="utf-8")
@@ -102,8 +106,7 @@ class QwenPersistentQueryEmbeddingBackend:
         paths = self.runtime_status.paths
         config = self.runtime_status.config
         command = [
-            str(paths.python),
-            str(worker),
+            str(paths.python), str(worker),
             "--qwen-repo", str(paths.qwen_repo),
             "--model-dir", str(paths.model_dir),
             "--runtime-dir", str(self.runtime_dir),
@@ -126,7 +129,7 @@ class QwenPersistentQueryEmbeddingBackend:
             )
         except OSError as exc:
             raise EmbeddingBackendError(f"Persistent Qwen query worker could not start: {exc}") from exc
-        self._wait_ready(time.monotonic() + self.startup_timeout_seconds)
+        self._wait_ready(startup_deadline)
 
     def _invoke(self, payload: dict[str, Any], *, expected_count: int) -> list[Vector]:
         self._ensure_worker()
