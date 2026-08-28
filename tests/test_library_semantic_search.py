@@ -71,7 +71,7 @@ def add_media_trace_embedding(
     return media, trace
 
 
-def test_semantic_search_attaches_media_only_after_vector_ranking(client, db_session, monkeypatch):
+def test_semantic_search_uses_persistent_query_runtime_and_attaches_media_only_after_vector_ranking(client, db_session, monkeypatch):
     first_media, first_trace = add_media_trace_embedding(
         db_session,
         source_id="C:/private/first.jpg",
@@ -91,7 +91,7 @@ def test_semantic_search_attaches_media_only_after_vector_ranking(client, db_ses
         vector=[0.0, 1.0, 0.0, 0.0],
     )
     backend = FakeQueryBackend()
-    monkeypatch.setattr("app.library_routes.QwenSubprocessEmbeddingBackend", lambda: backend)
+    monkeypatch.setattr("app.library_routes.QwenPersistentQueryEmbeddingBackend", lambda: backend)
 
     first = client.post(
         "/shocks_art/api/library/search/visual",
@@ -133,6 +133,7 @@ def test_semantic_search_attaches_media_only_after_vector_ranking(client, db_ses
         second_trace.trace_id,
     ]
     assert [item["score"] for item in second.json()["result"]["matches"]] == [1.0, 0.0]
+    assert backend.queries == [["man playing guitar"], ["man playing guitar"]]
 
 
 def test_visual_trace_artifact_is_prefix_safe_and_confined(client, db_session, tmp_path, monkeypatch):
