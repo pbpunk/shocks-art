@@ -56,7 +56,7 @@ def test_language_search_ranks_trace_text_not_media_title_or_filename(db_session
 
     assert result.trace_count == 2
     assert result.matches
-    assert result.matches[0].trace_id == relevant.trace_id
+    assert relevant.trace_id in result.matches[0].trace_ids
     assert all(match.media_id != leakage_media.media_id for match in result.matches)
     assert result.as_dict()["scoringIsolation"] == {
         "usesLanguageTraceTextOnly": True,
@@ -66,16 +66,54 @@ def test_language_search_ranks_trace_text_not_media_title_or_filename(db_session
     }
 
 
-def test_language_search_is_stable_for_equal_scores(db_session):
-    media = _media(db_session, "stable")
-    first = _trace(db_session, media, 1000, "fractal burning setup")
-    second = _trace(db_session, media, 2000, "fractal burning setup")
+def test_language_search_joins_nearby_concepts_and_beats_isolated_fragments(db_session):
+    coherent_media = _media(db_session, "coherent")
+    sanding = _trace(db_session, coherent_media, 100000, "now I am sanding the handles")
+    axes = _trace(db_session, coherent_media, 108000, "these three axes need another finish coat")
+
+    isolated_sanding = _media(db_session, "isolated-sanding")
+    _trace(db_session, isolated_sanding, 100000, "sanding sanding sanding")
+    isolated_axes = _media(db_session, "isolated-axes")
+    _trace(db_session, isolated_axes, 100000, "axes axes axes")
+    db_session.commit()
+
+    result = search_language_traces(db_session, query="sanding axes", top_k=5)
+
+    assert result.matches[0].media_id == coherent_media.media_id
+    assert set(result.matches[0].matched_terms) == {"axes", "sanding"}
+    assert sanding.trace_id in result.matches[0].trace_ids
+    assert axes.trace_id in result.matches[0].trace_ids
+    assert result.matches[0].start_ms <= 100000
+    assert result.matches[0].end_ms >= 111000
+
+
+def test_language_search_keeps_distinct_equal_score_moments_stable(db_session):
+    first_media = _media(db_session, "stable-a")
+    second_media = _media(db_session, "stable-b")
+    first = _trace(db_session, first_media, 1000, "fractal burning setup")
+    second = _trace(db_session, second_media, 1000, "fractal burning setup")
     db_session.commit()
 
     result = search_language_traces(db_session, query="fractal burning setup", top_k=5)
 
-    expected = sorted([first.trace_id, second.trace_id])
-    assert [match.trace_id for match in result.matches] == expected
+    assert {match.trace_id for match in result.matches} == {first.trace_id, second.trace_id}
+    assert [match.media_id for match in result.matches] == sorted(
+        [first_media.media_id, second_media.media_id]
+    )
+
+
+def test_language_search_collapses_overlapping_seed_windows(db_session):
+    media = _media(db_session, "overlap")
+    first = _trace(db_session, media, 100000, "fractal burning")
+    second = _trace(db_session, media, 106000, "setup with the transformer")
+    db_session.commit()
+
+    result = search_language_traces(db_session, query="fractal burning setup", top_k=5)
+
+    assert len(result.matches) == 1
+    assert first.trace_id in result.matches[0].trace_ids
+    assert second.trace_id in result.matches[0].trace_ids
+    assert set(result.matches[0].matched_terms) == {"burning", "fractal", "setup"}
 
 
 def test_language_search_rejects_blank_query(db_session):
