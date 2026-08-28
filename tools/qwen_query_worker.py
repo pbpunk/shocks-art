@@ -87,6 +87,7 @@ def main() -> int:
     stop_path.unlink(missing_ok=True)
 
     stopping = False
+    failed = False
 
     def _stop(*_args: object) -> None:
         nonlocal stopping
@@ -193,14 +194,16 @@ def main() -> int:
             finally:
                 request_path.unlink(missing_ok=True)
     except Exception as exc:
+        failed = True
         write_status("failed", error=f"{type(exc).__name__}: {exc}")
         return 1
     finally:
         stop_path.unlink(missing_ok=True)
-        try:
-            write_status("stopped")
-        except Exception:
-            pass
+        if not failed:
+            try:
+                write_status("stopped")
+            except Exception:
+                pass
     return 0
 
 
