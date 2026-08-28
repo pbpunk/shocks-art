@@ -1,4 +1,8 @@
-from app.indexing.language_search import search_language_traces, tokenize_language_query
+from app.indexing.language_search import (
+    searchable_language_query_tokens,
+    search_language_traces,
+    tokenize_language_query,
+)
 from app.library_models import Media, Trace
 
 
@@ -36,6 +40,19 @@ def _trace(db_session, media: Media, start_ms: int, text: str, trace_type: str =
 
 def test_tokenize_language_query_is_casefolded_and_metadata_agnostic():
     assert tokenize_language_query("Sanding AXES, epoxy's cure") == ("sanding", "axes", "epoxy's", "cure")
+
+
+def test_searchable_language_query_tokens_remove_grammatical_glue():
+    assert searchable_language_query_tokens("gluing letters onto a sign") == (
+        "gluing",
+        "letters",
+        "sign",
+    )
+    assert searchable_language_query_tokens("mixing and pouring epoxy") == (
+        "mixing",
+        "pouring",
+        "epoxy",
+    )
 
 
 def test_language_search_ranks_trace_text_not_media_title_or_filename(db_session):
@@ -85,6 +102,21 @@ def test_language_search_joins_nearby_concepts_and_beats_isolated_fragments(db_s
     assert axes.trace_id in result.matches[0].trace_ids
     assert result.matches[0].start_ms <= 100000
     assert result.matches[0].end_ms >= 111000
+
+
+def test_language_search_prioritizes_more_distinct_query_concepts(db_session):
+    full_media = _media(db_session, "full")
+    _trace(db_session, full_media, 100000, "I am gluing the letters onto this custom sign")
+
+    noisy_media = _media(db_session, "noisy")
+    _trace(db_session, noisy_media, 100000, "letters letters letters letters sign sign sign")
+    db_session.commit()
+
+    result = search_language_traces(db_session, query="gluing letters onto a sign", top_k=5)
+
+    assert result.query_tokens == ("gluing", "letters", "sign")
+    assert result.matches[0].media_id == full_media.media_id
+    assert result.matches[0].matched_terms == ("gluing", "letters", "sign")
 
 
 def test_language_search_keeps_distinct_equal_score_moments_stable(db_session):
