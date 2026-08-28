@@ -22,6 +22,7 @@ def test_qwen_query_worker_preserves_startup_failure_status(tmp_path, monkeypatc
             "--batch-size", "2",
             "--generation-id", "generation-test",
             "--dimension", "3",
+            "--protocol-version", str(qwen_query_worker.WORKER_PROTOCOL_VERSION),
         ],
     )
 
@@ -29,6 +30,7 @@ def test_qwen_query_worker_preserves_startup_failure_status(tmp_path, monkeypatc
     status = json.loads((runtime_dir / "status.json").read_text(encoding="utf-8"))
     assert status["state"] == "failed"
     assert status["generationId"] == "generation-test"
+    assert status["workerProtocolVersion"] == qwen_query_worker.WORKER_PROTOCOL_VERSION
     assert "Qwen implementation is missing" in status["error"]
 
 
