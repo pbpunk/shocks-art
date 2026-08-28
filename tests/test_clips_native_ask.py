@@ -182,7 +182,7 @@ def test_native_ask_replaces_model_timestamp_with_real_caption_timestamp(db_sess
     assert candidate.emergent_observations["_transcript_evidence_grounding"]["source"] == "stored_json3_captions"
 
 
-def test_native_ask_rejects_quote_found_only_outside_proposed_window(db_session, tmp_path):
+def test_native_ask_reanchors_window_when_quote_has_one_strong_global_match(db_session, tmp_path):
     stream = make_stream(db_session, source_video_id="E9F-vEbmZpg")
     quote = (
         "Now, we have a bunch of letters and what I'm going to do is I'm going to kind of lay them out "
@@ -193,12 +193,65 @@ def test_native_ask_rejects_quote_found_only_outside_proposed_window(db_session,
         stream,
         tmp_path,
         [
-            _event(90, "unrelated shop chatter inside the candidate window"),
+            _event(90, "unrelated shop chatter inside the proposed candidate window"),
             _event(720, quote),
+            _event(900, "later unrelated shop chatter"),
         ],
     )
 
-    with pytest.raises(CandidateEvidenceValidationError, match="could not be grounded inside the proposed candidate window"):
+    _, candidates, skipped = save_clips_native_ask_response(db_session, stream, GLUING_RESPONSE)
+    db_session.commit()
+
+    assert skipped == 0
+    assert len(candidates) == 1
+    candidate = candidates[0]
+    assert candidate.end_seconds - candidate.start_seconds == 331
+    assert candidate.start_seconds <= 720 <= candidate.end_seconds
+    assert candidate.start_seconds != 46
+    assert candidate.transcript_evidence[0]["seconds"] == 720
+    grounding = candidate.emergent_observations["_transcript_evidence_grounding"]
+    assert grounding["mode"] == "reanchored_from_global_caption_match"
+    assert grounding["originalWindow"] == {"startSeconds": 46, "endSeconds": 377}
+    assert "native_ask_window_reanchored" in candidate.risks
+
+
+def test_native_ask_rejects_ambiguous_global_quote_match(db_session, tmp_path):
+    stream = make_stream(db_session, source_video_id="E9F-vEbmZpg")
+    quote = (
+        "Now, we have a bunch of letters and what I'm going to do is I'm going to kind of lay them out "
+        "before I glue them because that is the smart thing to do."
+    )
+    _add_transcript(
+        db_session,
+        stream,
+        tmp_path,
+        [
+            _event(90, "unrelated shop chatter inside the proposed candidate window"),
+            _event(720, quote),
+            _event(1200, quote),
+        ],
+    )
+
+    with pytest.raises(CandidateEvidenceValidationError, match="no strong unambiguous full-transcript match"):
+        save_clips_native_ask_response(db_session, stream, GLUING_RESPONSE)
+
+    assert stream.processing_status == "failed"
+    assert not stream.candidates
+
+
+def test_native_ask_rejects_hallucinated_global_quote(db_session, tmp_path):
+    stream = make_stream(db_session, source_video_id="E9F-vEbmZpg")
+    _add_transcript(
+        db_session,
+        stream,
+        tmp_path,
+        [
+            _event(90, "unrelated shop chatter inside the proposed candidate window"),
+            _event(720, "the actual captions discuss a completely different woodworking task"),
+        ],
+    )
+
+    with pytest.raises(CandidateEvidenceValidationError, match="no strong unambiguous full-transcript match"):
         save_clips_native_ask_response(db_session, stream, GLUING_RESPONSE)
 
     assert stream.processing_status == "failed"
