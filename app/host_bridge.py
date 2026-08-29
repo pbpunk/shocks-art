@@ -10,6 +10,7 @@ REVISION_RE: Final = re.compile(r"^[0-9a-fA-F]{40}$")
 HOST_PROFILES: Final[tuple[str, ...]] = (
     "whisper-benchmark",
     "whisper-benchmark-prepare",
+    "whisper-benchmark-finalize",
     "private-youtube-probe",
     "indexer-soak",
     "clips-native-ask-smoke",
@@ -26,6 +27,7 @@ HOST_PROFILES: Final[tuple[str, ...]] = (
 HOST_PROFILE_POLICIES: Final[dict[str, str]] = {
     "whisper-benchmark": "candidate-or-main",
     "whisper-benchmark-prepare": "main-only",
+    "whisper-benchmark-finalize": "main-only",
     "private-youtube-probe": "candidate-or-main",
     "indexer-soak": "main-only",
     "clips-native-ask-smoke": "main-only",
