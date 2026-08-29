@@ -36,6 +36,8 @@ The first ordinary 100-candidate `retrieval-quality` run on exact deployed `0b5b
 
 Schema 6 keeps retrieval behavior unchanged but compacts fusion evidence to one Language Trace ID and one visual Trace ID per pair, omits redundant Language Trace-ID arrays and visual artifact paths, shortens text snippets, and enforces a 28,000-character successful-receipt budget. If the encoded success payload exceeds that budget, the evaluator returns nonzero instead of allowing a truncated PASS receipt.
 
+The first schema-6 ordinary baseline on exact deployed `94f067051f7ee5be0140fd008ebe7e42007e74e0` correctly failed closed: its encoded success payload was **29,173 characters**, 1,173 above the 28,000-character bridge budget. Retrieval evidence itself was unchanged. The receipt-fit follow-up therefore reduces persisted Language snippets from 160 to **96 characters** while preserving query identity, Media/Trace identity, ranks, scores, timestamps, gaps, candidate depth, and temporal policy.
+
 ## Decision result
 
 ### Sanding axes
