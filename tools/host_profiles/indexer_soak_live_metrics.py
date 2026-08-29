@@ -6,10 +6,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from tools.host_profiles.indexer_soak_redundancy import collect_long_form_redundancy
-
 CODE_ROOT = Path(__file__).resolve().parents[2]
 LIVE_ROOT = Path(os.getenv("SHOCKS_HOST_LIVE_ROOT", CODE_ROOT)).resolve()
+if str(CODE_ROOT) not in sys.path:
+    sys.path.insert(0, str(CODE_ROOT))
+
+# This utility has no app imports. Load the candidate implementation before the
+# helper deliberately removes candidate paths and makes live production app
+# modules authoritative.
+from tools.host_profiles.indexer_soak_redundancy import collect_long_form_redundancy
 
 
 def emit(payload: dict[str, Any], code: int = 0) -> int:
