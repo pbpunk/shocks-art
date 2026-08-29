@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -44,6 +45,52 @@ def request_json(path: str, *, method: str = "GET", payload: dict[str, Any] | No
             return int(response.status), value if isinstance(value, dict) else {}, time.perf_counter() - started
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
         return 0, {}, time.perf_counter() - started
+
+
+def semantic_search_measurement(payload: dict[str, Any], request_seconds: float) -> dict[str, float | int] | None:
+    result = payload.get("result")
+    if not isinstance(result, dict):
+        return None
+    fields = {
+        "query_embedding_ms": payload.get("queryEmbeddingMs"),
+        "vector_retrieval_ms": result.get("elapsedMs"),
+        "database_ms": result.get("databaseMs"),
+        "scoring_ms": result.get("scoringMs"),
+        "vector_count": result.get("vectorCount"),
+    }
+    try:
+        measurement: dict[str, float | int] = {
+            "request_seconds": round(float(request_seconds), 4),
+            "query_embedding_ms": round(float(fields["query_embedding_ms"]), 4),
+            "vector_retrieval_ms": round(float(fields["vector_retrieval_ms"]), 4),
+            "database_ms": round(float(fields["database_ms"]), 4),
+            "scoring_ms": round(float(fields["scoring_ms"]), 4),
+            "vector_count": int(fields["vector_count"]),
+        }
+    except (TypeError, ValueError):
+        return None
+    if measurement["vector_count"] < 1:
+        return None
+    return measurement
+
+
+def trace_inventory() -> dict[str, Any]:
+    previous_cwd = Path.cwd()
+    try:
+        os.chdir(LIVE_ROOT)
+        if str(LIVE_ROOT) not in sys.path:
+            sys.path.insert(0, str(LIVE_ROOT))
+        from sqlalchemy import func, select
+
+        from app.core.database import SessionLocal
+        from app.library_models import Trace
+
+        with SessionLocal() as db:
+            rows = list(db.execute(select(Trace.trace_type, func.count()).group_by(Trace.trace_type)).all())
+    finally:
+        os.chdir(previous_cwd)
+    by_type = {str(trace_type): int(count) for trace_type, count in rows}
+    return {"total": sum(by_type.values()), "by_type": by_type}
 
 
 def gpu_memory_mib() -> float | None:
@@ -125,7 +172,7 @@ def main() -> int:
     started = time.monotonic()
     next_search = 0.0
     health_checks = health_failures = search_failures = 0
-    search_latencies: list[float] = []
+    search_measurements: list[dict[str, float | int]] = []
     gpu_samples: list[float] = []
     scratch_initial = scratch_bytes()
     scratch_peak = scratch_initial
@@ -161,20 +208,29 @@ def main() -> int:
                 payload={"query": QUERY, "top_k": 5},
                 timeout=180,
             )
-            if status == 200 and isinstance(payload.get("result"), dict):
-                search_latencies.append(latency)
+            measurement = semantic_search_measurement(payload, latency) if status == 200 else None
+            if measurement is not None:
+                search_measurements.append(measurement)
             else:
                 search_failures += 1
             next_search = elapsed + 300
         time.sleep(min(10, max(0.5, DURATION - (time.monotonic() - started))))
 
     final_scratch = scratch_bytes()
-    healthy = health_checks > 0 and health_failures == 0
-    search_ok = bool(search_latencies) and search_failures == 0
+    try:
+        traces = trace_inventory()
+        trace_inventory_ok = traces["total"] > 0
+    except Exception as exc:
+        traces = {"total": 0, "by_type": {}, "error": f"{type(exc).__name__}: {str(exc)[:500]}"}
+        trace_inventory_ok = False
+
+    health_ok = health_checks > 0 and health_failures == 0
+    search_ok = bool(search_measurements) and search_failures == 0
     queue_ok = first_job_status == "completed" and second_job_status == "completed"
     restart_ok = stop_ok and start_ok and worker_after
     scratch_ok = final_scratch <= max(scratch_initial, scratch_peak)
-    ok = worker_before and queue_ok and restart_ok and healthy and search_ok and scratch_ok
+    ok = worker_before and queue_ok and restart_ok and health_ok and search_ok and scratch_ok and trace_inventory_ok
+    request_latencies = [float(item["request_seconds"]) for item in search_measurements]
     return emit(
         {
             "summary": "Indexer lifecycle soak passed" if ok else "Indexer lifecycle soak found a runtime/recovery failure",
@@ -204,11 +260,14 @@ def main() -> int:
                 "second_result": second_job.get("result", {}),
             },
             "health": {"checks": health_checks, "failures": health_failures},
+            "trace_volume": traces,
             "semantic_search": {
-                "checks": len(search_latencies) + search_failures,
+                "checks": len(search_measurements) + search_failures,
                 "failures": search_failures,
-                "max_seconds": round(max(search_latencies), 3) if search_latencies else None,
-                "average_seconds": round(sum(search_latencies) / len(search_latencies), 3) if search_latencies else None,
+                "max_seconds": round(max(request_latencies), 4) if request_latencies else None,
+                "average_seconds": round(sum(request_latencies) / len(request_latencies), 4) if request_latencies else None,
+                "measurements": search_measurements,
+                "latency_split": "query_embedding_ms is model/runtime work; vector_retrieval_ms is SQLite load plus in-process cosine scoring",
             },
             "gpu": {"samples": len(gpu_samples), "max_used_mib": round(max(gpu_samples), 1) if gpu_samples else None},
             "scratch": {"initial_bytes": scratch_initial, "peak_bytes": scratch_peak, "final_bytes": final_scratch},
