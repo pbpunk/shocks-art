@@ -26,7 +26,7 @@ def test_retrieval_quality_receipt_is_compact_bounded_and_versioned() -> None:
     source = PROFILE.read_text(encoding="utf-8")
     assert '"schemaVersion": 6' in source
     assert "MAX_RECEIPT_JSON_CHARS = 28_000" in source
-    assert "TEXT_SNIPPET_CHARS = 160" in source
+    assert "TEXT_SNIPPET_CHARS = 96" in source
     assert '"receiptBudgetChars": MAX_RECEIPT_JSON_CHARS' in source
     assert "match.as_dict()" not in source
     assert "language_trace_ids" not in source
