@@ -12,8 +12,14 @@ from typing import Any
 LIVE_ROOT = Path(os.getenv("SHOCKS_HOST_LIVE_ROOT", Path(__file__).resolve().parents[2])).resolve()
 BASE_URL = os.getenv("SHOCKS_INDEXER_SOAK_BASE_URL", "http://127.0.0.1:8000/shocks_art").rstrip("/")
 MAX_SOAK_SECONDS = 900
-REQUESTED_DURATION = max(120, int(os.getenv("SHOCKS_INDEXER_SOAK_SECONDS", str(MAX_SOAK_SECONDS))))
-DURATION = min(MAX_SOAK_SECONDS, REQUESTED_DURATION)
+
+
+def resolve_soak_duration(raw: str | None) -> tuple[int, int]:
+    requested = max(120, int(raw or str(MAX_SOAK_SECONDS)))
+    return requested, min(MAX_SOAK_SECONDS, requested)
+
+
+REQUESTED_DURATION, DURATION = resolve_soak_duration(os.getenv("SHOCKS_INDEXER_SOAK_SECONDS"))
 QUERY = os.getenv("SHOCKS_INDEXER_SOAK_QUERY", "man playing guitar")
 SCRATCH = Path(os.getenv("LIBRARY_SCRATCH_PATH", LIVE_ROOT / "data" / "library_scratch"))
 
