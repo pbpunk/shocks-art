@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from tools.host_profiles import private_youtube_probe as probe
 
 
@@ -62,3 +64,11 @@ def test_resolve_probe_url_fails_closed_when_discovery_is_unavailable(monkeypatc
     monkeypatch.setattr(probe, "discover_private_owner_url", lambda: "")
 
     assert probe.resolve_probe_url() == ("", "unavailable")
+
+
+def test_owner_discovery_uses_bounded_uploads_playlist_not_search() -> None:
+    source = (Path(__file__).resolve().parents[1] / "tools" / "host_profiles" / "private_youtube_probe.py").read_text(encoding="utf-8")
+
+    assert probe.MAX_OWNER_DISCOVERY_VIDEOS == 200
+    assert ".playlistItems()" in source
+    assert ".search()" not in source
