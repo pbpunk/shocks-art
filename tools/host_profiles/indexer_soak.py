@@ -11,7 +11,9 @@ from typing import Any
 
 LIVE_ROOT = Path(os.getenv("SHOCKS_HOST_LIVE_ROOT", Path(__file__).resolve().parents[2])).resolve()
 BASE_URL = os.getenv("SHOCKS_INDEXER_SOAK_BASE_URL", "http://127.0.0.1:8000/shocks_art").rstrip("/")
-DURATION = min(21600, max(120, int(os.getenv("SHOCKS_INDEXER_SOAK_SECONDS", "900"))))
+MAX_SOAK_SECONDS = 900
+REQUESTED_DURATION = max(120, int(os.getenv("SHOCKS_INDEXER_SOAK_SECONDS", str(MAX_SOAK_SECONDS))))
+DURATION = min(MAX_SOAK_SECONDS, REQUESTED_DURATION)
 QUERY = os.getenv("SHOCKS_INDEXER_SOAK_QUERY", "man playing guitar")
 SCRATCH = Path(os.getenv("LIBRARY_SCRATCH_PATH", LIVE_ROOT / "data" / "library_scratch"))
 
@@ -171,6 +173,11 @@ def main() -> int:
         {
             "summary": "Indexer lifecycle soak passed" if ok else "Indexer lifecycle soak found a runtime/recovery failure",
             "duration_seconds": round(time.monotonic() - started, 1),
+            "duration_policy": {
+                "requested_seconds": REQUESTED_DURATION,
+                "effective_seconds": DURATION,
+                "max_seconds": MAX_SOAK_SECONDS,
+            },
             "worker": {
                 "present_before": worker_before,
                 "before": worker_before_detail,
