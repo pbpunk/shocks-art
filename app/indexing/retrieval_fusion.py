@@ -22,9 +22,11 @@ class TemporalFusionMatch:
     language_trace_ids: tuple[str, ...]
     language_rank: int
     language_score: float
+    language_text: str
     visual_trace_id: str
     visual_rank: int
     visual_score: float
+    visual_artifact_path: str
     gap_ms: int
     proximity: float
 
@@ -41,11 +43,13 @@ class TemporalFusionMatch:
                 "traceIds": list(self.language_trace_ids),
                 "rank": self.language_rank,
                 "score": round(self.language_score, 8),
+                "text": self.language_text,
             },
             "visual": {
                 "traceId": self.visual_trace_id,
                 "rank": self.visual_rank,
                 "score": round(self.visual_score, 8),
+                "artifactPath": self.visual_artifact_path,
             },
         }
 
@@ -121,8 +125,8 @@ def fuse_temporal_retrieval(
                 continue
 
             proximity = _proximity_for_gap(gap_ms, max_gap_ms)
-            language_rrf = 1.0 / (rrf_k + language_rank + 1)
-            visual_rrf = 1.0 / (rrf_k + visual_rank + 1)
+            language_rrf = 1.0 / (rrf_k + language_rank)
+            visual_rrf = 1.0 / (rrf_k + visual_rank)
             agreement = min(language_rrf, visual_rrf) * proximity * proximity_weight
             score = language_rrf + visual_rrf + agreement
             candidate = TemporalFusionMatch(
@@ -134,23 +138,30 @@ def fuse_temporal_retrieval(
                 language_trace_ids=language.trace_ids,
                 language_rank=language_rank,
                 language_score=language.score,
+                language_text=language.text,
                 visual_trace_id=visual.trace_id,
                 visual_rank=visual_rank,
                 visual_score=visual.score,
+                visual_artifact_path=visual.artifact_path,
                 gap_ms=gap_ms,
                 proximity=proximity,
             )
-            if best is None or (
-                candidate.score,
-                -candidate.gap_ms,
-                -candidate.language_rank,
+            if best is None:
+                best = candidate
+                continue
+            candidate_key = (
+                -candidate.score,
+                candidate.gap_ms,
+                candidate.language_rank,
                 candidate.language_trace_id,
-            ) > (
-                best.score,
-                -best.gap_ms,
-                -best.language_rank,
+            )
+            best_key = (
+                -best.score,
+                best.gap_ms,
+                best.language_rank,
                 best.language_trace_id,
-            ):
+            )
+            if candidate_key < best_key:
                 best = candidate
         if best is not None:
             fused.append(best)
