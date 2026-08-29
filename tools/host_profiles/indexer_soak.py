@@ -10,9 +10,9 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
-from tools.host_profiles.indexer_soak_redundancy import collect_long_form_redundancy
-
-LIVE_ROOT = Path(os.getenv("SHOCKS_HOST_LIVE_ROOT", Path(__file__).resolve().parents[2])).resolve()
+CODE_ROOT = Path(__file__).resolve().parents[2]
+LIVE_ROOT = Path(os.getenv("SHOCKS_HOST_LIVE_ROOT", CODE_ROOT)).resolve()
+LIVE_METRICS_HELPER = CODE_ROOT / "tools" / "host_profiles" / "indexer_soak_live_metrics.py"
 BASE_URL = os.getenv("SHOCKS_INDEXER_SOAK_BASE_URL", "http://127.0.0.1:8000/shocks_art").rstrip("/")
 MAX_SOAK_SECONDS = 900
 
@@ -76,23 +76,36 @@ def semantic_search_measurement(payload: dict[str, Any], request_seconds: float)
     return measurement
 
 
-def trace_inventory() -> dict[str, Any]:
-    previous_cwd = Path.cwd()
+def read_live_metrics(model_id: str, dimension: int) -> dict[str, Any]:
+    if not model_id or dimension <= 0:
+        return {"ok": False, "error_type": "ActiveVisualGenerationUnavailable"}
+    env = os.environ.copy()
+    env["SHOCKS_HOST_LIVE_ROOT"] = str(LIVE_ROOT)
+    env["SHOCKS_INDEXER_SOAK_MODEL_ID"] = model_id
+    env["SHOCKS_INDEXER_SOAK_DIMENSION"] = str(dimension)
     try:
-        os.chdir(LIVE_ROOT)
-        if str(LIVE_ROOT) not in sys.path:
-            sys.path.insert(0, str(LIVE_ROOT))
-        from sqlalchemy import func, select
+        result = subprocess.run(
+            [sys.executable, str(LIVE_METRICS_HELPER)],
+            cwd=CODE_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=120,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error_type": "LiveMetricsTimeout"}
 
-        from app.core.database import SessionLocal
-        from app.library_models import Trace
-
-        with SessionLocal() as db:
-            rows = list(db.execute(select(Trace.trace_type, func.count()).group_by(Trace.trace_type)).all())
-    finally:
-        os.chdir(previous_cwd)
-    by_type = {str(trace_type): int(count) for trace_type, count in rows}
-    return {"total": sum(by_type.values()), "by_type": by_type, "source": "live-production-sqlite"}
+    if not result.stdout:
+        return {"ok": False, "error_type": f"LiveMetricsExit{result.returncode}"}
+    try:
+        parsed = json.loads(result.stdout.strip().splitlines()[-1])
+    except (json.JSONDecodeError, IndexError):
+        return {"ok": False, "error_type": "LiveMetricsInvalidJson"}
+    if not isinstance(parsed, dict):
+        return {"ok": False, "error_type": "LiveMetricsInvalidPayload"}
+    return parsed
 
 
 def gpu_memory_mib() -> float | None:
@@ -231,32 +244,23 @@ def main() -> int:
         time.sleep(min(10, max(0.5, DURATION - (time.monotonic() - started))))
 
     final_scratch = scratch_bytes()
-    try:
-        traces = trace_inventory()
-        trace_inventory_ok = traces["total"] > 0
-    except Exception as exc:
-        traces = {"total": 0, "by_type": {}, "source": "live-production-sqlite", "error_type": type(exc).__name__}
-        trace_inventory_ok = False
-
-    try:
-        if not active_model_id or active_dimension <= 0:
-            raise RuntimeError("active_visual_generation_unavailable")
-        redundancy = collect_long_form_redundancy(
-            live_root=LIVE_ROOT,
-            model_id=active_model_id,
-            dimension=active_dimension,
-        )
-        redundancy_ok = bool(redundancy.get("available"))
-    except Exception as exc:
-        redundancy = {
-            "available": False,
-            "model_id": active_model_id,
-            "dimension": active_dimension,
-            "error_type": type(exc).__name__,
-            "metadata_used_for_scoring": False,
-            "source": "live-production-sqlite-existing-embeddings",
-        }
-        redundancy_ok = False
+    live_metrics = read_live_metrics(active_model_id, active_dimension)
+    traces = live_metrics.get("trace_volume") if isinstance(live_metrics.get("trace_volume"), dict) else {
+        "total": 0,
+        "by_type": {},
+        "source": "live-production-sqlite",
+        "error_type": str(live_metrics.get("error_type") or "LiveMetricsUnavailable"),
+    }
+    redundancy = live_metrics.get("long_form_visual_redundancy") if isinstance(live_metrics.get("long_form_visual_redundancy"), dict) else {
+        "available": False,
+        "model_id": active_model_id,
+        "dimension": active_dimension,
+        "error_type": str(live_metrics.get("error_type") or "LiveMetricsUnavailable"),
+        "metadata_used_for_scoring": False,
+        "source": "live-production-sqlite-existing-embeddings",
+    }
+    trace_inventory_ok = int(traces.get("total") or 0) > 0
+    redundancy_ok = bool(redundancy.get("available"))
 
     health_ok = health_checks > 0 and health_failures == 0
     search_ok = bool(search_measurements) and search_failures == 0
@@ -306,6 +310,7 @@ def main() -> int:
                 "latency_split": "query_embedding_ms is model/runtime work; vector_retrieval_ms is SQLite load plus in-process cosine scoring",
             },
             "long_form_visual_redundancy": redundancy,
+            "live_metrics_isolated": True,
             "gpu": {"samples": len(gpu_samples), "max_used_mib": round(max(gpu_samples), 1) if gpu_samples else None},
             "scratch": {
                 "initial_bytes": scratch_initial,
