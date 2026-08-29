@@ -10,7 +10,11 @@ from app.core.database import SessionLocal
 from app.indexing.embeddings import EmbeddingBackendError
 from app.indexing.language_search import search_language_traces
 from app.indexing.qwen_query_backend import QwenPersistentQueryEmbeddingBackend
-from app.indexing.retrieval_fusion import fuse_temporal_retrieval, temporal_gap_ms
+from app.indexing.retrieval_fusion import (
+    DEFAULT_MAX_GAP_MS,
+    fuse_temporal_retrieval,
+    temporal_gap_ms,
+)
 from app.indexing.visual_search import search_visual_embeddings
 from app.library_models import Embedding, Trace
 
@@ -23,7 +27,7 @@ EVAL_QUERIES = (
     ("gluing-sign", "gluing letters onto a sign"),
 )
 TOP_K = 5
-CANDIDATE_K = 25
+CANDIDATE_K = 100
 
 
 def _language_payload(result) -> dict[str, Any]:
@@ -82,6 +86,7 @@ def _fusion_payload(matches) -> dict[str, Any]:
         ],
         "policy": {
             "candidatePoolK": CANDIDATE_K,
+            "temporalMaxGapMs": DEFAULT_MAX_GAP_MS,
             "sameMediaOnly": True,
             "rawScoreScalesMixed": False,
             "metadataUsed": False,
@@ -189,11 +194,12 @@ def main() -> int:
                 )
 
         payload = {
-            "schemaVersion": 4,
+            "schemaVersion": 5,
             "summary": f"Full-stream retrieval baseline completed for {len(rows)} fixed queries",
             "queryCount": len(rows),
             "topK": TOP_K,
             "candidatePoolK": CANDIDATE_K,
+            "temporalMaxGapMs": DEFAULT_MAX_GAP_MS,
             "queryEmbeddingMs": round(query_embedding_ms, 4),
             "elapsedMs": round((time.perf_counter() - started) * 1000.0, 4),
             "modelId": backend.model_id,
