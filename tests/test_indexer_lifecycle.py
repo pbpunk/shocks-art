@@ -57,6 +57,12 @@ def test_app_lifecycle_owns_indexer_worker() -> None:
     assert "exit 0" not in stop_worker
 
 
+def test_worker_passes_media_scope_to_visual_embedding_stage() -> None:
+    worker = (ROOT / "app" / "indexing" / "worker.py").read_text(encoding="utf-8")
+    assert 'if job.job_type == "visual-embeddings"' in worker
+    assert 'media_id=job.media_id or None' in worker
+
+
 def test_soak_profile_exercises_live_queue_restart_and_search() -> None:
     soak = (ROOT / "tools" / "host_profiles" / "indexer_soak.py").read_text(encoding="utf-8")
     assert '/api/library/indexing/jobs' in soak
