@@ -38,18 +38,34 @@ def test_depth_sweep_reports_expected_target_media_without_using_metadata() -> N
     assert "title" not in source
 
 
-def test_depth_sweep_receipt_is_compact_and_bridge_bounded() -> None:
+def test_depth_sweep_fixes_semantic_language_anchors_for_decision_receipt() -> None:
+    source = PROFILE.read_text(encoding="utf-8")
+    for trace_id in (
+        "trace_1a81f877bcba4a4aa04d647745424d14",
+        "trace_881afad9478944918286f370a9aa1721",
+        "trace_15f39d71d81241cbb22519233b4e347e",
+    ):
+        assert trace_id in source
+    assert '"anchorLanguagePresent"' in source
+    assert '"anchorFusedCount"' in source
+    assert '"anchorInGlobalTop5"' in source
+    assert '"anchorGlobal"' in source
+
+
+def test_depth_sweep_receipt_is_decision_only_and_bridge_bounded() -> None:
     source = PROFILE.read_text(encoding="utf-8")
     assert "MAX_RECEIPT_JSON_CHARS = 28_000" in source
-    assert "TEXT_SNIPPET_CHARS = 96" in source
+    assert "TEXT_SNIPPET_CHARS = 56" in source
     assert '"globalMediaIds"' in source
-    assert 'depth_payload["globalExpected"]' in source
-    assert 'depth_payload["targetTop"]' in source
+    assert '"expectedMediaInGlobalTop5"' in source
+    assert '"expectedGlobalBest"' in source
     assert 'depth_payload["globalTop"]' in source
     assert '"globalFused":' not in source
     assert '"targetFused":' not in source
+    assert '"targetTop"' not in source
     assert "visualTraceId" in source
     assert "languageTraceId" in source
+    assert "_global_rank_map" in source
 
 
 def test_depth_sweep_binds_live_root_before_database_import() -> None:
