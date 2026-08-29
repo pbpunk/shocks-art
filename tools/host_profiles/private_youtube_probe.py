@@ -12,7 +12,6 @@ from typing import Any
 
 CODE_ROOT = Path(__file__).resolve().parents[2]
 LIVE_ROOT = Path(os.getenv("SHOCKS_HOST_LIVE_ROOT", CODE_ROOT)).resolve()
-os.chdir(LIVE_ROOT)
 if str(CODE_ROOT) not in sys.path:
     sys.path.insert(0, str(CODE_ROOT))
 
@@ -45,14 +44,19 @@ def choose_private_video_id(search_items: list[dict[str, Any]], detail_items: li
 def discover_private_owner_url() -> str:
     from googleapiclient.discovery import build
 
-    from app.core.database import SessionLocal
-    from app.services.youtube_analytics import connected_credential, credentials_from_record
+    previous_cwd = Path.cwd()
+    try:
+        os.chdir(LIVE_ROOT)
+        from app.core.database import SessionLocal
+        from app.services.youtube_analytics import connected_credential, credentials_from_record
 
-    with SessionLocal() as db:
-        record = connected_credential(db)
-        if record is None:
-            return ""
-        credentials = credentials_from_record(record)
+        with SessionLocal() as db:
+            record = connected_credential(db)
+            if record is None:
+                return ""
+            credentials = credentials_from_record(record)
+    finally:
+        os.chdir(previous_cwd)
 
     youtube = build("youtube", "v3", credentials=credentials, cache_discovery=False)
     search_response = (
