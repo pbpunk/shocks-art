@@ -91,6 +91,34 @@ The deterministic rebuild then re-ingests configured local media into a fresh Me
 
 Acceptance requires healthy app state and unchanged exact live revision, unchanged canonical Stream/StreamTranscript counts, zero direct/legacy Gemini AnalysisRuns afterward, no stale `Studio Tour and Finished Pieces` candidate, successful stored-caption rebuild, successful native-Ask reseeding for the selected previously-native streams, and fresh candidates for `pDC14ymQqWY`. The receipt includes sanitized before/after counts and the safety-backup filename, not the backup path or workstation secrets.
 
+### `derived-data-resume`
+
+Resumes the repository-owned deterministic rebuild after an already-approved `derived-data-reinitialize` operation when a previous rebuild stopped after the destructive clearing step. It is `main-only` and does not broaden the destructive scope. The Sheet cannot choose tables, sources, Media IDs, models, paths, URLs, or commands.
+
+### `retrieval-quality`
+
+Runs the fixed five-query full-stream Library retrieval evaluator against the deployed production database. It is `main-only` and read-only. The Sheet cannot provide queries, candidate depth, Media IDs, paths, model IDs, or commands.
+
+The fixed queries are `sanding axes`, `fractal burning setup`, `finished staffs`, `mixing and pouring epoxy`, and `gluing letters onto a sign`. The receipt includes Language and visual top candidates, same-Media temporal fusion, corpus/candidate Media overlap, query latency, persistent Qwen model identity, and explicit scoring-isolation evidence. Filename, title, and source path do not participate in semantic scoring.
+
+### `cross-modal-overlap-proof`
+
+Runs one bounded proof that a canonical captioned YouTube Media can acquire visual Traces and exact-generation Qwen embeddings and then produce grounded same-Media temporal retrieval for the fixed query `sanding axes`. It is `main-only`.
+
+The profile owns the fixed Media ID and query. It requires the live singleton indexer worker, refuses to compete with unrelated queued/running indexing work, and may enqueue only targeted `visual-media` and Media-scoped `visual-embeddings` jobs for that one Media. It never invokes `visual-pending` or bulk remote indexing. Acceptance requires Language evidence, visual evidence, exact-generation embeddings, fused temporal evidence, scratch cleanup, and metadata-isolated scoring.
+
+### `retrieval-coverage-expand`
+
+Runs a bounded three-Media visual coverage expansion for transcript-grounded unresolved retrieval cases. It is `main-only` and mutates only derived visual indexing state for three repository-fixed canonical YouTube Media IDs.
+
+The profile requires existing Language Traces and the live singleton indexer worker, refuses existing queued/running indexing work, reuses existing visual evidence, and otherwise enqueues only targeted `visual-media` and Media-scoped `visual-embeddings` jobs. It never invokes `visual-pending` or bulk remote indexing. The Sheet cannot supply queries, Media IDs, paths, URLs, models, commands, or breadth. Receipts include per-target before/after trace and embedding counts plus scratch-cleanup evidence.
+
+### `retrieval-target-diagnostics`
+
+Runs deep, read-only diagnostics for two unresolved retrieval cases plus the recovered sign-work control after cross-modal coverage exists. It is `main-only`. The repository owns all three query/Media pairs and the search depths; the Sheet cannot supply queries, Media IDs, candidate depth, paths, URLs, models, or commands.
+
+For each target, the profile reports the target Media's global Language and visual ranks, the strongest Language anchor and its temporally nearest visual frame, the strongest visual anchor and its temporally nearest Language window, explicit top-25/top-50/top-100 inclusion flags, and the best available temporal pair. The purpose is to distinguish shallow candidate pools from genuinely asymmetric cross-modal moments that require Associations rather than unsafe temporal widening. It performs no indexing or production-state mutation and does not use display metadata for selection or scoring.
+
 ### `repo-tests`
 
 Runs the repository's complete `pytest -q` suite at the exact requested SHA using a workstation Python runtime that already has the app and test dependencies. The Sheet cannot select a test file, marker, module, command, Python path, or pytest argument.

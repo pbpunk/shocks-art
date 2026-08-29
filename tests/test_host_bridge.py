@@ -27,6 +27,7 @@ def test_host_profiles_are_fixed_and_narrow() -> None:
         "retrieval-quality",
         "cross-modal-overlap-proof",
         "retrieval-coverage-expand",
+        "retrieval-target-diagnostics",
         "repo-tests",
     )
     assert set(HOST_PROFILE_POLICIES) == set(HOST_PROFILES)
@@ -38,6 +39,7 @@ def test_host_profiles_are_fixed_and_narrow() -> None:
     assert profile_policy("retrieval-quality") == "main-only"
     assert profile_policy("cross-modal-overlap-proof") == "main-only"
     assert profile_policy("retrieval-coverage-expand") == "main-only"
+    assert profile_policy("retrieval-target-diagnostics") == "main-only"
     assert profile_policy("whisper-benchmark") == "candidate-or-main"
     assert profile_policy("repo-tests") == "candidate-or-main"
 
