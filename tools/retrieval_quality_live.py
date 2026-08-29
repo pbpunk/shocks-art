@@ -29,7 +29,7 @@ EVAL_QUERIES = (
 TOP_K = 5
 CANDIDATE_K = 100
 MAX_RECEIPT_JSON_CHARS = 28_000
-TEXT_SNIPPET_CHARS = 160
+TEXT_SNIPPET_CHARS = 96
 
 
 def emit(payload: dict[str, Any], code: int = 0) -> int:
