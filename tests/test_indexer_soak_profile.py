@@ -1,6 +1,7 @@
 from tools.host_profiles.indexer_soak import (
     MAX_SOAK_SECONDS,
     resolve_soak_duration,
+    scratch_is_clean,
     semantic_search_measurement,
 )
 from tools.run_host_profile import PROFILE_TIMEOUT_SECONDS
@@ -56,3 +57,10 @@ def test_semantic_search_measurement_keeps_model_and_vector_latency_separate() -
 def test_semantic_search_measurement_fails_closed_on_missing_split_metrics() -> None:
     assert semantic_search_measurement({"result": {"vectorCount": 3}}, 0.2) is None
     assert semantic_search_measurement({"queryEmbeddingMs": 10, "result": {"elapsedMs": 1, "databaseMs": 1, "scoringMs": 0, "vectorCount": 0}}, 0.2) is None
+
+
+def test_scratch_cleanup_requires_final_usage_not_to_exceed_initial_usage() -> None:
+    assert scratch_is_clean(0, 0) is True
+    assert scratch_is_clean(100, 50) is True
+    assert scratch_is_clean(100, 100) is True
+    assert scratch_is_clean(100, 101) is False
