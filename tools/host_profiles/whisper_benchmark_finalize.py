@@ -6,9 +6,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
-
 LIVE_ROOT = Path(os.getenv("SHOCKS_HOST_LIVE_ROOT", Path(__file__).resolve().parents[2])).resolve()
 if str(LIVE_ROOT) not in sys.path:
     sys.path.insert(0, str(LIVE_ROOT))
@@ -118,6 +115,9 @@ def build_reviewed_manifest(draft_payload: Any, review_rows: list[list[object]])
 
 
 def _sheets_service():
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+
     if not SPREADSHEET_ID:
         raise RuntimeError("SHOCKS_GOOGLE_SPREADSHEET_ID is not configured")
     if not CREDENTIALS_PATH.is_file():
