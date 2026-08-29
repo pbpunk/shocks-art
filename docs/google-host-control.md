@@ -119,6 +119,12 @@ Runs deep, read-only diagnostics for two unresolved retrieval cases plus the rec
 
 For each target, the profile reports the target Media's global Language and visual ranks, the strongest Language anchor and its temporally nearest visual frame, the strongest visual anchor and its temporally nearest Language window, explicit top-25/top-50/top-100 inclusion flags, and the best available temporal pair. The purpose is to distinguish shallow candidate pools from genuinely asymmetric cross-modal moments that require Associations rather than unsafe temporal widening. It performs no indexing or production-state mutation and does not use display metadata for selection or scoring.
 
+### `retrieval-depth-sweep`
+
+Runs a read-only candidate-depth experiment over the same fixed five retrieval-quality queries. It is `main-only`. The profile performs one deep Language/visual retrieval pass per query and reuses those exact ranked results at candidate depths 25, 50, 100, and 500 before applying the unchanged same-Media temporal fusion rule.
+
+The Sheet cannot supply queries, target Media IDs, candidate depths, model IDs, paths, URLs, or commands. The profile reports global fused results at each depth and target-only fusion for repository-fixed expected Media where applicable. It does not widen the temporal rule, enqueue indexing work, mutate production state, or use filename/title/path metadata for semantic selection or scoring. The purpose is to separate ordinary candidate-pool misses from cases where very low opposite-modality semantic rank indicates a need for planned Association propagation instead of brute-force widening.
+
 ### `repo-tests`
 
 Runs the repository's complete `pytest -q` suite at the exact requested SHA using a workstation Python runtime that already has the app and test dependencies. The Sheet cannot select a test file, marker, module, command, Python path, or pytest argument.

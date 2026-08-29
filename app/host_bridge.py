@@ -19,6 +19,7 @@ HOST_PROFILES: Final[tuple[str, ...]] = (
     "cross-modal-overlap-proof",
     "retrieval-coverage-expand",
     "retrieval-target-diagnostics",
+    "retrieval-depth-sweep",
     "repo-tests",
 )
 HOST_PROFILE_POLICIES: Final[dict[str, str]] = {
@@ -33,6 +34,7 @@ HOST_PROFILE_POLICIES: Final[dict[str, str]] = {
     "cross-modal-overlap-proof": "main-only",
     "retrieval-coverage-expand": "main-only",
     "retrieval-target-diagnostics": "main-only",
+    "retrieval-depth-sweep": "main-only",
     "repo-tests": "candidate-or-main",
 }
 VERIFICATION_HEADERS: Final[tuple[str, ...]] = (
