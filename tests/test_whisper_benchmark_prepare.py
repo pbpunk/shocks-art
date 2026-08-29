@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from tools.host_profiles.whisper_benchmark import validate_manifest_payload
@@ -10,6 +12,12 @@ def test_bounded_review_window_stays_inside_candidate_and_near_evidence() -> Non
     assert bounded_window(100, 200, 130) == (127, 172)
     assert bounded_window(100, 120, 101) == (100, 120)
     assert bounded_window(100, 109, 103) == (100, 109)
+
+
+def test_prep_uses_production_native_ask_complete_status() -> None:
+    source = (Path(__file__).resolve().parents[1] / "tools" / "host_profiles" / "whisper_benchmark_prepare.py").read_text(encoding="utf-8")
+    assert 'AnalysisRun.status == "complete"' in source
+    assert 'AnalysisRun.status == "completed"' not in source
 
 
 def test_review_draft_cannot_be_used_as_benchmark_ground_truth() -> None:

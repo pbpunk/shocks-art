@@ -316,7 +316,7 @@ def main() -> int:
         candidates = db.scalars(
             select(CandidateWindow)
             .join(AnalysisRun, CandidateWindow.analysis_run_id == AnalysisRun.analysis_run_id)
-            .where(AnalysisRun.status == "completed")
+            .where(AnalysisRun.status == "complete")
             .order_by(CandidateWindow.created_at.desc(), CandidateWindow.candidate_rank.asc())
         ).all()
 
