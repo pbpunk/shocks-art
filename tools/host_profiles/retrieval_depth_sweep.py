@@ -29,23 +29,40 @@ QUERIES: tuple[tuple[str, str, str | None], ...] = (
 DEPTHS = (25, 50, 100, 500)
 MAX_DEPTH = max(DEPTHS)
 TOP_K = 5
+MAX_RECEIPT_JSON_CHARS = 28_000
+TEXT_SNIPPET_CHARS = 96
 
 
 def emit(payload: dict[str, Any], code: int = 0) -> int:
-    print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    if code == 0 and len(encoded) > MAX_RECEIPT_JSON_CHARS:
+        print(
+            json.dumps(
+                {
+                    "summary": "Fixed retrieval candidate-depth sweep receipt exceeded compact bridge budget",
+                    "receiptJsonChars": len(encoded),
+                    "receiptBudgetChars": MAX_RECEIPT_JSON_CHARS,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
+        return 1
+    print(encoded)
     return code
 
 
-def _match_payload(match) -> dict[str, Any]:
+def _compact_match(match) -> dict[str, Any]:
     return {
         "mediaId": match.media_id,
         "startMs": match.start_ms,
         "endMs": match.end_ms,
         "gapMs": match.gap_ms,
-        "score": round(match.score, 8),
         "languageRank": match.language_rank,
         "visualRank": match.visual_rank,
-        "languageText": match.language_text[:240],
+        "languageTraceId": match.language_trace_id,
+        "visualTraceId": match.visual_trace_id,
+        "languageText": match.language_text[:TEXT_SNIPPET_CHARS],
     }
 
 
@@ -86,20 +103,27 @@ def main() -> int:
                         target_language_count = len(target_language)
                         target_visual_count = len(target_visual)
                         target_fused = fuse_temporal_retrieval(target_language, target_visual, top_k=TOP_K)
-                    depth_rows.append(
-                        {
-                            "candidateDepth": depth,
-                            "languageCandidates": len(language_candidates),
-                            "visualCandidates": len(visual_candidates),
-                            "globalFusedCount": len(fused),
-                            "globalFused": [_match_payload(match) for match in fused],
-                            "expectedMediaId": expected_media_id,
-                            "targetLanguageCandidates": target_language_count,
-                            "targetVisualCandidates": target_visual_count,
-                            "targetFusedCount": len(target_fused) if expected_media_id is not None else None,
-                            "targetFused": [_match_payload(match) for match in target_fused],
-                        }
-                    )
+
+                    depth_payload: dict[str, Any] = {
+                        "candidateDepth": depth,
+                        "languageCandidates": len(language_candidates),
+                        "visualCandidates": len(visual_candidates),
+                        "globalFusedCount": len(fused),
+                        "globalMediaIds": [match.media_id for match in fused],
+                        "expectedMediaId": expected_media_id,
+                        "targetLanguageCandidates": target_language_count,
+                        "targetVisualCandidates": target_visual_count,
+                        "targetFusedCount": len(target_fused) if expected_media_id is not None else None,
+                    }
+                    if expected_media_id is None:
+                        depth_payload["globalTop"] = [_compact_match(match) for match in fused]
+                    else:
+                        depth_payload["globalExpected"] = [
+                            _compact_match(match) for match in fused if match.media_id == expected_media_id
+                        ]
+                        depth_payload["targetTop"] = [_compact_match(match) for match in target_fused]
+                    depth_rows.append(depth_payload)
+
                 rows.append(
                     {
                         "queryId": query_id,
@@ -112,13 +136,14 @@ def main() -> int:
 
         return emit(
             {
-                "summary": "Fixed retrieval candidate-depth sweep completed",
+                "summary": "Fixed retrieval candidate-depth sweep completed with compact decision receipt",
                 "candidateDepths": list(DEPTHS),
                 "topK": TOP_K,
                 "queryCount": len(rows),
                 "queries": rows,
                 "modelId": backend.model_id,
                 "dimension": backend.dimension,
+                "receiptBudgetChars": MAX_RECEIPT_JSON_CHARS,
                 "temporalRuleChanged": False,
                 "metadataUsedForSelectionOrScoring": False,
                 "stateMutationRequested": False,
