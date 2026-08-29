@@ -10,6 +10,8 @@ import urllib.request
 from pathlib import Path
 from typing import Any
 
+from tools.host_profiles.indexer_soak_redundancy import collect_long_form_redundancy
+
 LIVE_ROOT = Path(os.getenv("SHOCKS_HOST_LIVE_ROOT", Path(__file__).resolve().parents[2])).resolve()
 BASE_URL = os.getenv("SHOCKS_INDEXER_SOAK_BASE_URL", "http://127.0.0.1:8000/shocks_art").rstrip("/")
 MAX_SOAK_SECONDS = 900
@@ -177,6 +179,8 @@ def main() -> int:
     next_search = 0.0
     health_checks = health_failures = search_failures = 0
     search_measurements: list[dict[str, float | int]] = []
+    active_model_id = ""
+    active_dimension = 0
     gpu_samples: list[float] = []
     scratch_initial = scratch_bytes()
     scratch_peak = scratch_initial
@@ -213,8 +217,14 @@ def main() -> int:
                 timeout=180,
             )
             measurement = semantic_search_measurement(payload, latency) if status == 200 else None
-            if measurement is not None:
+            result = payload.get("result") if status == 200 else None
+            if measurement is not None and isinstance(result, dict):
                 search_measurements.append(measurement)
+                active_model_id = str(result.get("modelId") or active_model_id)
+                try:
+                    active_dimension = int(result.get("dimension") or active_dimension)
+                except (TypeError, ValueError):
+                    active_dimension = 0
             else:
                 search_failures += 1
             next_search = elapsed + 300
@@ -228,12 +238,32 @@ def main() -> int:
         traces = {"total": 0, "by_type": {}, "source": "live-production-sqlite", "error_type": type(exc).__name__}
         trace_inventory_ok = False
 
+    try:
+        if not active_model_id or active_dimension <= 0:
+            raise RuntimeError("active_visual_generation_unavailable")
+        redundancy = collect_long_form_redundancy(
+            live_root=LIVE_ROOT,
+            model_id=active_model_id,
+            dimension=active_dimension,
+        )
+        redundancy_ok = bool(redundancy.get("available"))
+    except Exception as exc:
+        redundancy = {
+            "available": False,
+            "model_id": active_model_id,
+            "dimension": active_dimension,
+            "error_type": type(exc).__name__,
+            "metadata_used_for_scoring": False,
+            "source": "live-production-sqlite-existing-embeddings",
+        }
+        redundancy_ok = False
+
     health_ok = health_checks > 0 and health_failures == 0
     search_ok = bool(search_measurements) and search_failures == 0
     queue_ok = first_job_status == "completed" and second_job_status == "completed"
     restart_ok = stop_ok and start_ok and worker_after
     scratch_ok = scratch_is_clean(scratch_initial, final_scratch)
-    ok = worker_before and queue_ok and restart_ok and health_ok and search_ok and scratch_ok and trace_inventory_ok
+    ok = worker_before and queue_ok and restart_ok and health_ok and search_ok and scratch_ok and trace_inventory_ok and redundancy_ok
     request_latencies = [float(item["request_seconds"]) for item in search_measurements]
     return emit(
         {
@@ -271,8 +301,11 @@ def main() -> int:
                 "max_seconds": round(max(request_latencies), 4) if request_latencies else None,
                 "average_seconds": round(sum(request_latencies) / len(request_latencies), 4) if request_latencies else None,
                 "measurements": search_measurements,
+                "active_model_id": active_model_id,
+                "active_dimension": active_dimension,
                 "latency_split": "query_embedding_ms is model/runtime work; vector_retrieval_ms is SQLite load plus in-process cosine scoring",
             },
+            "long_form_visual_redundancy": redundancy,
             "gpu": {"samples": len(gpu_samples), "max_used_mib": round(max(gpu_samples), 1) if gpu_samples else None},
             "scratch": {
                 "initial_bytes": scratch_initial,
