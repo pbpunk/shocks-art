@@ -90,7 +90,7 @@ def trace_inventory() -> dict[str, Any]:
     finally:
         os.chdir(previous_cwd)
     by_type = {str(trace_type): int(count) for trace_type, count in rows}
-    return {"total": sum(by_type.values()), "by_type": by_type}
+    return {"total": sum(by_type.values()), "by_type": by_type, "source": "live-production-sqlite"}
 
 
 def gpu_memory_mib() -> float | None:
@@ -111,6 +111,10 @@ def gpu_memory_mib() -> float | None:
 
 def scratch_bytes() -> int:
     return sum(path.stat().st_size for path in SCRATCH.rglob("*") if path.is_file()) if SCRATCH.exists() else 0
+
+
+def scratch_is_clean(initial_bytes: int, final_bytes: int) -> bool:
+    return final_bytes <= initial_bytes
 
 
 def run_ps1(script_name: str) -> tuple[bool, str]:
@@ -221,14 +225,14 @@ def main() -> int:
         traces = trace_inventory()
         trace_inventory_ok = traces["total"] > 0
     except Exception as exc:
-        traces = {"total": 0, "by_type": {}, "error": f"{type(exc).__name__}: {str(exc)[:500]}"}
+        traces = {"total": 0, "by_type": {}, "source": "live-production-sqlite", "error_type": type(exc).__name__}
         trace_inventory_ok = False
 
     health_ok = health_checks > 0 and health_failures == 0
     search_ok = bool(search_measurements) and search_failures == 0
     queue_ok = first_job_status == "completed" and second_job_status == "completed"
     restart_ok = stop_ok and start_ok and worker_after
-    scratch_ok = final_scratch <= max(scratch_initial, scratch_peak)
+    scratch_ok = scratch_is_clean(scratch_initial, final_scratch)
     ok = worker_before and queue_ok and restart_ok and health_ok and search_ok and scratch_ok and trace_inventory_ok
     request_latencies = [float(item["request_seconds"]) for item in search_measurements]
     return emit(
@@ -270,7 +274,12 @@ def main() -> int:
                 "latency_split": "query_embedding_ms is model/runtime work; vector_retrieval_ms is SQLite load plus in-process cosine scoring",
             },
             "gpu": {"samples": len(gpu_samples), "max_used_mib": round(max(gpu_samples), 1) if gpu_samples else None},
-            "scratch": {"initial_bytes": scratch_initial, "peak_bytes": scratch_peak, "final_bytes": final_scratch},
+            "scratch": {
+                "initial_bytes": scratch_initial,
+                "peak_bytes": scratch_peak,
+                "final_bytes": final_scratch,
+                "cleaned": scratch_ok,
+            },
         },
         0 if ok else 1,
     )
