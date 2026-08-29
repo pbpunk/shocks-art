@@ -128,6 +128,7 @@ def _dispatch(job: IndexJob) -> dict[str, Any]:
                 db,
                 index_root=Path(settings.library_index_path),
                 backend=backend,
+                media_id=job.media_id or None,
                 limit=job.payload.get("limit"),
             )
             return result.as_dict()

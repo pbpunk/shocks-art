@@ -45,6 +45,27 @@ def test_enqueue_list_cancel_and_retry_are_queue_only(client, monkeypatch, tmp_p
     assert queue.get(job_id).status == "queued"
 
 
+def test_visual_embedding_job_preserves_optional_media_scope(client, monkeypatch, tmp_path):
+    queue = install_queue(monkeypatch, tmp_path)
+
+    created = client.post(
+        "/shocks_art/api/library/indexing/jobs",
+        json={
+            "job_type": "visual-embeddings",
+            "media_id": "media_target",
+            "limit": 12,
+        },
+    )
+
+    assert created.status_code == 200
+    job_id = created.json()["job"]["jobId"]
+    queued = queue.get(job_id)
+    assert queued.job_type == "visual-embeddings"
+    assert queued.media_id == "media_target"
+    assert queued.payload == {"limit": 12}
+    assert created.json()["job"]["mediaId"] == "media_target"
+
+
 def test_running_job_refuses_force_cancel(client, monkeypatch, tmp_path):
     queue = install_queue(monkeypatch, tmp_path)
     job = queue.enqueue("visual-pending")

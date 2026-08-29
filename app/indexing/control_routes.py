@@ -59,7 +59,11 @@ def _enqueue_from_request(queue: IndexJobQueue, payload: QueueJobRequest) -> Ind
             payload={"limit": payload.limit, "include_remote": payload.include_remote},
         )
     if job_type == "visual-embeddings":
-        return queue.enqueue(job_type, payload={"limit": payload.limit})
+        return queue.enqueue(
+            job_type,
+            media_id=payload.media_id,
+            payload={"limit": payload.limit},
+        )
     if job_type == "sync-stream-media":
         return queue.enqueue(
             job_type,

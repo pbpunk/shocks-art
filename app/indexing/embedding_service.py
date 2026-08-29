@@ -72,6 +72,7 @@ def index_visual_trace_embeddings(
     *,
     index_root: Path,
     backend: EmbeddingBackend,
+    media_id: str | None = None,
     limit: int | None = None,
     chunk_size: int = DEFAULT_VISUAL_EMBEDDING_CHUNK_SIZE,
     max_attempts_per_chunk: int = DEFAULT_VISUAL_EMBEDDING_ATTEMPTS,
@@ -81,6 +82,10 @@ def index_visual_trace_embeddings(
     Existing rows for the exact backend model generation and dimension are
     reused. A different model/config generation uses a different model_id and
     therefore creates a separate row rather than silently replacing vectors.
+
+    ``media_id`` optionally confines the pass to one canonical Media item. This
+    keeps bounded remote proofs and targeted retries from consuming unrelated
+    pending visual Traces. Omitting it preserves the existing global behavior.
 
     Missing embeddings are processed and committed in bounded chunks. If a later
     backend invocation fails or times out, completed chunks remain durable and a
@@ -92,11 +97,13 @@ def index_visual_trace_embeddings(
     if max_attempts_per_chunk <= 0:
         raise ValueError("max_attempts_per_chunk must be greater than zero")
 
-    query = (
-        select(Trace)
-        .where(Trace.trace_type == "visual")
-        .order_by(Trace.media_id.asc(), Trace.start_ms.asc(), Trace.trace_id.asc())
-    )
+    query = select(Trace).where(Trace.trace_type == "visual")
+    if media_id is not None:
+        target_media_id = str(media_id).strip()
+        if not target_media_id:
+            raise ValueError("media_id must not be blank when provided")
+        query = query.where(Trace.media_id == target_media_id)
+    query = query.order_by(Trace.media_id.asc(), Trace.start_ms.asc(), Trace.trace_id.asc())
     if limit is not None:
         if limit <= 0:
             raise ValueError("limit must be greater than zero when provided")
