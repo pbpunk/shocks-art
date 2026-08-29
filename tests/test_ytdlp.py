@@ -152,12 +152,32 @@ def test_download_source_falls_back_to_anonymous_public_policy_when_browser_auth
     assert commands[2][commands[2].index("--extractor-args") + 1] == SOURCE_EXTRACTOR_ARGS
 
 
-def test_browser_cookie_args_defaults_to_chrome_and_explicit_blank_disables(monkeypatch):
+def test_browser_cookie_args_defaults_to_chrome_and_explicit_blank_disables(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.services.ytdlp.ROOT_DIR", tmp_path)
     monkeypatch.delenv("SHOCKS_YTDLP_COOKIES_FROM_BROWSER", raising=False)
     assert browser_cookie_args() == ("--cookies-from-browser", "chrome")
 
     monkeypatch.setenv("SHOCKS_YTDLP_COOKIES_FROM_BROWSER", "")
     assert browser_cookie_args() == ()
+
+
+def test_browser_cookie_args_reads_trusted_local_dotenv_when_not_inherited(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.services.ytdlp.ROOT_DIR", tmp_path)
+    monkeypatch.delenv("SHOCKS_YTDLP_COOKIES_FROM_BROWSER", raising=False)
+    (tmp_path / ".env").write_text(
+        "OTHER=value\nSHOCKS_YTDLP_COOKIES_FROM_BROWSER='edge:Profile 1'\n",
+        encoding="utf-8",
+    )
+
+    assert browser_cookie_args() == ("--cookies-from-browser", "edge:Profile 1")
+
+
+def test_browser_cookie_args_process_environment_overrides_trusted_dotenv(monkeypatch, tmp_path):
+    monkeypatch.setattr("app.services.ytdlp.ROOT_DIR", tmp_path)
+    (tmp_path / ".env").write_text("SHOCKS_YTDLP_COOKIES_FROM_BROWSER=edge\n", encoding="utf-8")
+    monkeypatch.setenv("SHOCKS_YTDLP_COOKIES_FROM_BROWSER", "firefox")
+
+    assert browser_cookie_args() == ("--cookies-from-browser", "firefox")
 
 
 def test_download_source_fails_clearly_when_ytdlp_is_missing(tmp_path, monkeypatch):
