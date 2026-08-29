@@ -11,7 +11,7 @@ LIBRARY_ROUTES = ROOT / "app" / "library_routes.py"
 def test_retrieval_quality_uses_measured_candidate_depth() -> None:
     source = PROFILE.read_text(encoding="utf-8")
     assert "CANDIDATE_K = 100" in source
-    assert '"candidatePoolK": CANDIDATE_K' in source
+    assert "top_k=CANDIDATE_K" in source
     assert '"candidatePoolK": CANDIDATE_K' in source
 
 
@@ -22,9 +22,16 @@ def test_retrieval_quality_reports_unchanged_temporal_policy() -> None:
     assert "max_gap_ms=" not in source
 
 
-def test_retrieval_quality_receipt_schema_is_versioned() -> None:
+def test_retrieval_quality_receipt_is_compact_bounded_and_versioned() -> None:
     source = PROFILE.read_text(encoding="utf-8")
-    assert '"schemaVersion": 5' in source
+    assert '"schemaVersion": 6' in source
+    assert "MAX_RECEIPT_JSON_CHARS = 28_000" in source
+    assert "TEXT_SNIPPET_CHARS = 160" in source
+    assert '"receiptBudgetChars": MAX_RECEIPT_JSON_CHARS' in source
+    assert "match.as_dict()" not in source
+    assert "language_trace_ids" not in source
+    assert "visual_artifact_path" not in source
+    assert "receipt exceeded bridge budget" in source
 
 
 def test_retrieval_quality_remains_evaluation_only_and_metadata_isolated() -> None:

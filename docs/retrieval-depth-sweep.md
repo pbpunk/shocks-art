@@ -32,6 +32,10 @@ A first compact revision on `5ecfdbaa7a1e57cedde0ae9e1ab6e40621544fab` then fail
 
 The decision-focused sweep on exact deployed main `cd207a99ac1946218505080b7d39750b5a92eaac` passed with a complete receipt in 20.379 seconds. The experiment kept the existing 120,000 ms temporal ceiling, Qwen generation `Qwen/Qwen3-VL-Embedding-2B@9f2f7e710d6d#cfg-de309bcbc2df`, metadata isolation, and read-only execution.
 
+The first ordinary 100-candidate `retrieval-quality` run on exact deployed `0b5b82a6b3781cde8cda76e84e3454ee1682e9b6` also passed and confirmed the key semantic results, including the wizard-staffs 360 ms pair and the fractal setup 109.56-second pair. However, its schema-5 receipt was too verbose for durable Sheet persistence and was cut during the epoxy section. The evaluator therefore cannot treat that PASS row as a complete five-query durable receipt.
+
+Schema 6 keeps retrieval behavior unchanged but compacts fusion evidence to one Language Trace ID and one visual Trace ID per pair, omits redundant Language Trace-ID arrays and visual artifact paths, shortens text snippets, and enforces a 28,000-character successful-receipt budget. If the encoded success payload exceeds that budget, the evaluator returns nonzero instead of allowing a truncated PASS receipt.
+
 ## Decision result
 
 ### Sanding axes
@@ -62,8 +66,8 @@ The fixed sign Language anchor already works at depth 25 and remains stable at e
 
 ## Baseline policy after the sweep
 
-The `retrieval-quality` evaluation baseline now uses **100 candidates per modality**. This is the smallest measured depth that recovers the intended finished-staffs semantic anchor while preserving the already-working axes, epoxy, and sign controls.
+The `retrieval-quality` evaluation baseline uses **100 candidates per modality**. This is the smallest measured depth that recovers the intended finished-staffs semantic anchor while preserving the already-working axes, epoxy, and sign controls.
 
-The baseline receipt explicitly reports the unchanged **120,000 ms** temporal ceiling so near-boundary matches such as fractal remain inspectable. Its structured receipt is versioned independently from production search.
+The baseline receipt explicitly reports the unchanged **120,000 ms** temporal ceiling so near-boundary matches such as fractal remain inspectable. Its structured receipt is versioned independently from production search, and successful receipts are bounded below the durable Sheet persistence limit.
 
 This is an **evaluation baseline change only**. The production Library endpoint remains visual-only; `retrieval_fusion.py` remains an evaluation primitive and is not promoted to production relevance policy by this result. No Association, Entity, hybrid-language, or workflow backlog item is completed by this depth decision.
