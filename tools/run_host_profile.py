@@ -23,6 +23,7 @@ PROFILE_SCRIPTS = {
     "retrieval-quality": ROOT / "tools" / "host_profiles" / "retrieval_quality.py",
     "cross-modal-overlap-proof": ROOT / "tools" / "host_profiles" / "cross_modal_overlap_proof.py",
     "retrieval-coverage-expand": ROOT / "tools" / "host_profiles" / "retrieval_coverage_expand.py",
+    "retrieval-target-diagnostics": ROOT / "tools" / "host_profiles" / "retrieval_target_diagnostics.py",
     "repo-tests": ROOT / "tools" / "host_profiles" / "repo_tests.py",
 }
 
@@ -32,6 +33,7 @@ PROFILE_TIMEOUT_SECONDS = {
     "clips-native-ask-smoke": 1200,
     "clips-native-ask-rerun": 1200,
     "retrieval-quality": 2400,
+    "retrieval-target-diagnostics": 2400,
     "cross-modal-overlap-proof": 3600,
     "retrieval-coverage-expand": 7200,
     "indexer-soak": 1800,
