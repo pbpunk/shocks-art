@@ -17,6 +17,10 @@ if str(CODE_ROOT) not in sys.path:
 MAX_OWNER_DISCOVERY_VIDEOS = 200
 
 
+class PrivateSourceDiscoveryUnavailable(RuntimeError):
+    pass
+
+
 def emit(payload: dict[str, Any], code: int = 0) -> int:
     print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
     return code
@@ -54,7 +58,7 @@ def discover_private_owner_url() -> str:
         with SessionLocal() as db:
             record = connected_credential(db)
             if record is None:
-                return ""
+                raise PrivateSourceDiscoveryUnavailable("owner_oauth_not_connected")
             channel_id = str(record.channel_id or "")
             credentials = credentials_from_record(record)
     finally:
@@ -68,6 +72,9 @@ def discover_private_owner_url() -> str:
         for item in channel_response.get("items", [])
     ]
     uploads_playlists = [playlist_id for playlist_id in uploads_playlists if playlist_id]
+    if not uploads_playlists:
+        raise PrivateSourceDiscoveryUnavailable("owner_uploads_playlist_unavailable")
+
     scanned = 0
     for uploads_playlist in uploads_playlists:
         page_token: str | None = None
@@ -102,28 +109,31 @@ def discover_private_owner_url() -> str:
             page_token = response.get("nextPageToken")
             if not page_token or not video_ids:
                 break
-    return ""
+    raise PrivateSourceDiscoveryUnavailable(f"no_private_processed_upload_in_first_{scanned}_owner_uploads")
 
 
-def resolve_probe_url() -> tuple[str, str]:
+def resolve_probe_url() -> tuple[str, str, str]:
     configured = os.getenv("SHOCKS_PRIVATE_YOUTUBE_TEST_URL", "").strip()
     if configured:
-        return configured, "configured-host-url"
+        return configured, "configured-host-url", ""
     try:
         discovered = discover_private_owner_url()
-    except Exception:
-        discovered = ""
-    return (discovered, "owner-oauth-private-upload") if discovered else ("", "unavailable")
+    except PrivateSourceDiscoveryUnavailable as exc:
+        return "", "unavailable", str(exc)
+    except Exception as exc:
+        return "", "unavailable", f"discovery_error_type={type(exc).__name__}"
+    return (discovered, "owner-oauth-private-upload", "") if discovered else ("", "unavailable", "no_private_owner_upload")
 
 
 def main() -> int:
-    url, source_mode = resolve_probe_url()
+    url, source_mode, discovery_status = resolve_probe_url()
     if not url:
         return emit(
             {
                 "summary": "Private YouTube probe has no configured or discoverable private owner upload",
                 "configured": False,
                 "source_mode": source_mode,
+                "discovery_status": discovery_status,
             },
             2,
         )
