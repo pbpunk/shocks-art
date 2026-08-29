@@ -4,12 +4,15 @@ import json
 import time
 from typing import Any
 
+from sqlalchemy import select
+
 from app.core.database import SessionLocal
 from app.indexing.embeddings import EmbeddingBackendError
 from app.indexing.language_search import search_language_traces
 from app.indexing.qwen_query_backend import QwenPersistentQueryEmbeddingBackend
-from app.indexing.retrieval_fusion import fuse_temporal_retrieval
+from app.indexing.retrieval_fusion import fuse_temporal_retrieval, temporal_gap_ms
 from app.indexing.visual_search import search_visual_embeddings
+from app.library_models import Embedding, Trace
 
 
 EVAL_QUERIES = (
@@ -86,6 +89,58 @@ def _fusion_payload(matches) -> dict[str, Any]:
     }
 
 
+def _corpus_overlap_payload(db, *, model_id: str, dimension: int) -> dict[str, Any]:
+    language_media_ids = set(
+        db.scalars(
+            select(Trace.media_id).where(Trace.trace_type == "language").distinct()
+        ).all()
+    )
+    visual_media_ids = set(
+        db.scalars(
+            select(Trace.media_id)
+            .join(Embedding, Embedding.trace_id == Trace.trace_id)
+            .where(
+                Trace.trace_type == "visual",
+                Embedding.model_id == model_id,
+                Embedding.embedding_dimension == dimension,
+                Embedding.normalized.is_(True),
+            )
+            .distinct()
+        ).all()
+    )
+    shared_media_ids = sorted(language_media_ids.intersection(visual_media_ids))
+    return {
+        "languageMediaCount": len(language_media_ids),
+        "visualMediaCount": len(visual_media_ids),
+        "sharedMediaCount": len(shared_media_ids),
+        "sharedMediaIds": shared_media_ids,
+    }
+
+
+def _candidate_overlap_payload(language_matches, visual_matches) -> dict[str, Any]:
+    language_media_ids = {match.media_id for match in language_matches}
+    visual_media_ids = {match.media_id for match in visual_matches}
+    shared_media_ids = sorted(language_media_ids.intersection(visual_media_ids))
+    gaps = [
+        temporal_gap_ms(
+            language.start_ms,
+            language.end_ms,
+            visual.start_ms,
+            visual.end_ms,
+        )
+        for language in language_matches
+        for visual in visual_matches
+        if language.media_id == visual.media_id
+    ]
+    return {
+        "languageCandidateMediaCount": len(language_media_ids),
+        "visualCandidateMediaCount": len(visual_media_ids),
+        "sharedCandidateMediaCount": len(shared_media_ids),
+        "sharedCandidateMediaIds": shared_media_ids,
+        "nearestSameMediaGapMs": min(gaps) if gaps else None,
+    }
+
+
 def main() -> int:
     started = time.perf_counter()
     try:
@@ -100,6 +155,11 @@ def main() -> int:
 
         rows: list[dict[str, Any]] = []
         with SessionLocal() as db:
+            corpus_overlap = _corpus_overlap_payload(
+                db,
+                model_id=backend.model_id,
+                dimension=backend.dimension,
+            )
             for (query_id, text), query_vector in zip(EVAL_QUERIES, query_vectors, strict=True):
                 language = search_language_traces(db, query=text, top_k=CANDIDATE_K)
                 visual = search_visual_embeddings(
@@ -121,11 +181,15 @@ def main() -> int:
                         "language": _language_payload(language),
                         "visual": _visual_payload(visual),
                         "fusion": _fusion_payload(fused),
+                        "candidateOverlap": _candidate_overlap_payload(
+                            language.matches,
+                            visual.matches,
+                        ),
                     }
                 )
 
         payload = {
-            "schemaVersion": 3,
+            "schemaVersion": 4,
             "summary": f"Full-stream retrieval baseline completed for {len(rows)} fixed queries",
             "queryCount": len(rows),
             "topK": TOP_K,
@@ -134,6 +198,7 @@ def main() -> int:
             "elapsedMs": round((time.perf_counter() - started) * 1000.0, 4),
             "modelId": backend.model_id,
             "queryRuntime": "persistent-isolated-worker",
+            "corpusOverlap": corpus_overlap,
             "scoringIsolation": {
                 "languageUsesTraceTextOnly": True,
                 "visualUsesPersistedEmbeddingsOnly": True,
