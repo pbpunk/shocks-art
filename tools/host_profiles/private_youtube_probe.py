@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
-import subprocess
 import sys
 import tempfile
 import time
@@ -14,6 +12,14 @@ CODE_ROOT = Path(__file__).resolve().parents[2]
 LIVE_ROOT = Path(os.getenv("SHOCKS_HOST_LIVE_ROOT", CODE_ROOT)).resolve()
 if str(CODE_ROOT) not in sys.path:
     sys.path.insert(0, str(CODE_ROOT))
+
+from app.services.ytdlp import (
+    YtDlpError,
+    download_youtube_section,
+    download_youtube_source,
+    fetch_youtube_metadata,
+)
+
 MAX_OWNER_DISCOVERY_VIDEOS = 200
 
 
@@ -24,10 +30,6 @@ class PrivateSourceDiscoveryUnavailable(RuntimeError):
 def emit(payload: dict[str, Any], code: int = 0) -> int:
     print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
     return code
-
-
-def run(command: list[str], timeout: int) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, text=True, capture_output=True, timeout=timeout, check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 def choose_private_video_id(search_items: list[dict[str, Any]], detail_items: list[dict[str, Any]]) -> str:
@@ -65,7 +67,11 @@ def discover_private_owner_url() -> str:
         os.chdir(previous_cwd)
 
     youtube = build("youtube", "v3", credentials=credentials, cache_discovery=False)
-    channel_request = youtube.channels().list(part="contentDetails", maxResults=50, id=channel_id) if channel_id else youtube.channels().list(part="contentDetails", maxResults=50, mine=True)
+    channel_request = (
+        youtube.channels().list(part="contentDetails", maxResults=50, id=channel_id)
+        if channel_id
+        else youtube.channels().list(part="contentDetails", maxResults=50, mine=True)
+    )
     channel_response = channel_request.execute()
     uploads_playlists = [
         str(item.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads") or "")
@@ -125,6 +131,22 @@ def resolve_probe_url() -> tuple[str, str, str]:
     return (discovered, "owner-oauth-private-upload", "") if discovered else ("", "unavailable", "no_private_owner_upload")
 
 
+def safe_ytdlp_failure(stage: str, *, source_mode: str, video_id: str = "", elapsed_seconds: float | None = None) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "summary": f"Private YouTube {stage} probe failed",
+        "failure_stage": stage,
+        "source_mode": source_mode,
+        "error_type": "YtDlpError",
+        "credentials_emitted": False,
+        "signed_urls_emitted": False,
+    }
+    if video_id:
+        payload["video_id"] = video_id
+    if elapsed_seconds is not None:
+        payload[f"{stage}_seconds"] = round(elapsed_seconds, 3)
+    return payload
+
+
 def main() -> int:
     url, source_mode, discovery_status = resolve_probe_url()
     if not url:
@@ -134,54 +156,119 @@ def main() -> int:
                 "configured": False,
                 "source_mode": source_mode,
                 "discovery_status": discovery_status,
+                "credentials_emitted": False,
+                "signed_urls_emitted": False,
             },
             2,
         )
-    executable = shutil.which("yt-dlp")
-    if not executable:
-        return emit({"summary": "yt-dlp is unavailable on the host", "source_mode": source_mode}, 2)
-    browser = os.getenv("SHOCKS_YTDLP_COOKIES_FROM_BROWSER", "chrome").strip() or "chrome"
-    common = [executable, "--no-playlist", "--cookies-from-browser", browser]
 
     metadata_started = time.monotonic()
-    metadata = run([*common, "--skip-download", "--dump-single-json", url], timeout=120)
+    try:
+        info = fetch_youtube_metadata(url=url, timeout=120)
+    except YtDlpError:
+        return emit(
+            safe_ytdlp_failure(
+                "metadata",
+                source_mode=source_mode,
+                elapsed_seconds=time.monotonic() - metadata_started,
+            ),
+            1,
+        )
     metadata_seconds = time.monotonic() - metadata_started
-    if metadata.returncode != 0:
-        return emit({"summary": "Private YouTube authentication/metadata probe failed", "metadata_seconds": round(metadata_seconds, 3), "source_mode": source_mode, "error_tail": (metadata.stderr or metadata.stdout)[-2000:]}, 1)
-    info = json.loads(metadata.stdout)
+    video_id = str(info.get("id") or "")
 
     scratch_root = Path(os.getenv("SHOCKS_HOST_SCRATCH_ROOT", tempfile.gettempdir()))
+    scratch_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="shocks-youtube-probe-", dir=scratch_root) as temp_dir:
         temp = Path(temp_dir)
-        partial_output = temp / "partial.%(ext)s"
-        partial_started = time.monotonic()
-        partial = run([*common, "--download-sections", "*0-30", "--force-keyframes-at-cuts", "-f", "best[ext=mp4]/best", "-o", str(partial_output), url], timeout=600)
-        partial_seconds = time.monotonic() - partial_started
-        partial_files = [p for p in temp.iterdir() if p.is_file() and p.name.startswith("partial") and not p.name.endswith((".part", ".ytdl"))]
-        partial_bytes = sum(p.stat().st_size for p in partial_files)
-        if partial.returncode != 0 or partial_bytes <= 0:
-            return emit({"summary": "Private YouTube metadata succeeded but partial retrieval failed", "video_id": str(info.get("id") or ""), "metadata_seconds": round(metadata_seconds, 3), "partial_seconds": round(partial_seconds, 3), "source_mode": source_mode, "error_tail": (partial.stderr or partial.stdout)[-2000:]}, 1)
 
-        full_output = temp / "full.%(ext)s"
+        partial_started = time.monotonic()
+        try:
+            partial_path = download_youtube_section(
+                url=url,
+                output_template=temp / "partial.%(ext)s",
+                expected_path=temp / "partial.mp4",
+                start_seconds=0,
+                end_seconds=30,
+                timeout=600,
+            )
+        except YtDlpError:
+            return emit(
+                safe_ytdlp_failure(
+                    "partial",
+                    source_mode=source_mode,
+                    video_id=video_id,
+                    elapsed_seconds=time.monotonic() - partial_started,
+                ),
+                1,
+            )
+        partial_seconds = time.monotonic() - partial_started
+        partial_bytes = partial_path.stat().st_size
+        if partial_bytes <= 0:
+            return emit(
+                {
+                    **safe_ytdlp_failure("partial", source_mode=source_mode, video_id=video_id, elapsed_seconds=partial_seconds),
+                    "failure_reason": "empty_output",
+                },
+                1,
+            )
+
         full_started = time.monotonic()
-        full = run([*common, "-f", "best[ext=mp4]/best", "-o", str(full_output), url], timeout=3600)
+        try:
+            full_path = download_youtube_source(
+                url=url,
+                output_template=temp / "full.%(ext)s",
+                expected_path=temp / "full.mp4",
+                label="private-youtube-probe",
+            )
+        except YtDlpError:
+            return emit(
+                safe_ytdlp_failure(
+                    "full",
+                    source_mode=source_mode,
+                    video_id=video_id,
+                    elapsed_seconds=time.monotonic() - full_started,
+                ),
+                1,
+            )
         full_seconds = time.monotonic() - full_started
-        full_files = [p for p in temp.iterdir() if p.is_file() and p.name.startswith("full") and not p.name.endswith((".part", ".ytdl"))]
-        full_bytes = sum(p.stat().st_size for p in full_files)
-        if full.returncode != 0 or full_bytes <= 0:
-            return emit({"summary": "Private YouTube partial retrieval succeeded but full retrieval failed", "video_id": str(info.get("id") or ""), "metadata_seconds": round(metadata_seconds, 3), "partial_seconds": round(partial_seconds, 3), "partial_bytes": partial_bytes, "full_seconds": round(full_seconds, 3), "source_mode": source_mode, "error_tail": (full.stderr or full.stdout)[-2000:]}, 1)
+        full_bytes = full_path.stat().st_size
+        if full_bytes <= 0:
+            return emit(
+                {
+                    **safe_ytdlp_failure("full", source_mode=source_mode, video_id=video_id, elapsed_seconds=full_seconds),
+                    "failure_reason": "empty_output",
+                },
+                1,
+            )
 
     partial_mbps = (partial_bytes * 8 / 1_000_000) / partial_seconds if partial_seconds else None
     full_mbps = (full_bytes * 8 / 1_000_000) / full_seconds if full_seconds else None
-    return emit({
-        "summary": "Private YouTube authentication, partial retrieval, and full retrieval succeeded",
-        "configured": True, "source_mode": source_mode, "video_id": str(info.get("id") or ""), "duration_seconds": info.get("duration"),
-        "metadata_seconds": round(metadata_seconds, 3),
-        "partial": {"seconds": round(partial_seconds, 3), "bytes": partial_bytes, "throughput_mbps": round(partial_mbps, 3) if partial_mbps is not None else None},
-        "full": {"seconds": round(full_seconds, 3), "bytes": full_bytes, "throughput_mbps": round(full_mbps, 3) if full_mbps is not None else None},
-        "fallback": "If bounded section/range retrieval is unreliable for a private source, materialize the full source into the existing temporary Library scratch lease and delete it after use.",
-        "credentials_emitted": False, "signed_urls_emitted": False,
-    })
+    return emit(
+        {
+            "summary": "Private YouTube authentication, partial retrieval, and production-path full retrieval succeeded",
+            "configured": source_mode == "configured-host-url",
+            "source_mode": source_mode,
+            "video_id": video_id,
+            "duration_seconds": info.get("duration"),
+            "metadata_seconds": round(metadata_seconds, 3),
+            "partial": {
+                "seconds": round(partial_seconds, 3),
+                "bytes": partial_bytes,
+                "throughput_mbps": round(partial_mbps, 3) if partial_mbps is not None else None,
+            },
+            "full": {
+                "seconds": round(full_seconds, 3),
+                "bytes": full_bytes,
+                "throughput_mbps": round(full_mbps, 3) if full_mbps is not None else None,
+            },
+            "production_materialization_path_proven": True,
+            "authentication_policy": "shared-production-ytdlp",
+            "fallback": "If bounded section retrieval is unreliable for a private source, materialize the full source through the production MediaRetriever scratch lease and delete it after use.",
+            "credentials_emitted": False,
+            "signed_urls_emitted": False,
+        }
+    )
 
 
 if __name__ == "__main__":
