@@ -1,3 +1,4 @@
+from tools.host_profiles import indexer_soak
 from tools.host_profiles.indexer_soak import (
     MAX_SOAK_SECONDS,
     resolve_soak_duration,
@@ -64,3 +65,49 @@ def test_scratch_cleanup_requires_final_usage_not_to_exceed_initial_usage() -> N
     assert scratch_is_clean(100, 50) is True
     assert scratch_is_clean(100, 100) is True
     assert scratch_is_clean(100, 101) is False
+
+
+def test_wait_for_job_proves_health_overlap_while_status_is_running(monkeypatch) -> None:
+    snapshots = iter(
+        [
+            (
+                True,
+                {"jobs": [{"jobId": "job-1", "status": "running", "result": {}}]},
+            ),
+            (
+                True,
+                {"jobs": [{"jobId": "job-1", "status": "completed", "result": {"ok": True}}]},
+            ),
+        ]
+    )
+    monkeypatch.setattr(indexer_soak, "queue_snapshot", lambda: next(snapshots))
+    monkeypatch.setattr(indexer_soak, "request_json", lambda *args, **kwargs: (200, {"app": "shocks-art"}, 0.001))
+    monkeypatch.setattr(indexer_soak.time, "sleep", lambda _: None)
+
+    status, job, overlap = indexer_soak.wait_for_job_with_health("job-1", timeout=5)
+
+    assert status == "completed"
+    assert job["result"] == {"ok": True}
+    assert overlap == {
+        "saw_running": True,
+        "running_health_checks": 1,
+        "running_health_failures": 0,
+    }
+
+
+def test_wait_for_job_records_failed_health_during_running_status(monkeypatch) -> None:
+    snapshots = iter(
+        [
+            (True, {"jobs": [{"jobId": "job-1", "status": "running", "result": {}}]}),
+            (True, {"jobs": [{"jobId": "job-1", "status": "completed", "result": {}}]}),
+        ]
+    )
+    monkeypatch.setattr(indexer_soak, "queue_snapshot", lambda: next(snapshots))
+    monkeypatch.setattr(indexer_soak, "request_json", lambda *args, **kwargs: (0, {}, 0.001))
+    monkeypatch.setattr(indexer_soak.time, "sleep", lambda _: None)
+
+    _, _, overlap = indexer_soak.wait_for_job_with_health("job-1", timeout=5)
+
+    assert overlap["saw_running"] is True
+    assert overlap["running_health_checks"] == 1
+    assert overlap["running_health_failures"] == 1
