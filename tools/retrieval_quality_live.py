@@ -28,6 +28,27 @@ EVAL_QUERIES = (
 )
 TOP_K = 5
 CANDIDATE_K = 100
+MAX_RECEIPT_JSON_CHARS = 28_000
+TEXT_SNIPPET_CHARS = 160
+
+
+def emit(payload: dict[str, Any], code: int = 0) -> int:
+    encoded = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    if code == 0 and len(encoded) > MAX_RECEIPT_JSON_CHARS:
+        print(
+            json.dumps(
+                {
+                    "summary": "Full-stream retrieval baseline receipt exceeded bridge budget",
+                    "receiptJsonChars": len(encoded),
+                    "receiptBudgetChars": MAX_RECEIPT_JSON_CHARS,
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
+        return 1
+    print(encoded)
+    return code
 
 
 def _language_payload(result) -> dict[str, Any]:
@@ -44,7 +65,7 @@ def _language_payload(result) -> dict[str, Any]:
                 "startMs": match.start_ms,
                 "endMs": match.end_ms,
                 "score": round(match.score, 8),
-                "text": match.text[:240],
+                "text": match.text[:TEXT_SNIPPET_CHARS],
             }
             for rank, match in enumerate(result.matches[:TOP_K], start=1)
         ],
@@ -71,19 +92,32 @@ def _visual_payload(result) -> dict[str, Any]:
     }
 
 
+def _fusion_match_payload(match) -> dict[str, Any]:
+    return {
+        "mediaId": match.media_id,
+        "startMs": match.start_ms,
+        "endMs": match.end_ms,
+        "score": round(match.score, 8),
+        "gapMs": match.gap_ms,
+        "proximity": round(match.proximity, 8),
+        "language": {
+            "traceId": match.language_trace_id,
+            "rank": match.language_rank,
+            "score": round(match.language_score, 8),
+            "text": match.language_text[:TEXT_SNIPPET_CHARS],
+        },
+        "visual": {
+            "traceId": match.visual_trace_id,
+            "rank": match.visual_rank,
+            "score": round(match.visual_score, 8),
+        },
+    }
+
+
 def _fusion_payload(matches) -> dict[str, Any]:
     return {
         "returned": len(matches),
-        "matches": [
-            {
-                **match.as_dict(),
-                "language": {
-                    **match.as_dict()["language"],
-                    "text": match.language_text[:240],
-                },
-            }
-            for match in matches
-        ],
+        "matches": [_fusion_match_payload(match) for match in matches],
         "policy": {
             "candidatePoolK": CANDIDATE_K,
             "temporalMaxGapMs": DEFAULT_MAX_GAP_MS,
@@ -194,12 +228,13 @@ def main() -> int:
                 )
 
         payload = {
-            "schemaVersion": 5,
+            "schemaVersion": 6,
             "summary": f"Full-stream retrieval baseline completed for {len(rows)} fixed queries",
             "queryCount": len(rows),
             "topK": TOP_K,
             "candidatePoolK": CANDIDATE_K,
             "temporalMaxGapMs": DEFAULT_MAX_GAP_MS,
+            "receiptBudgetChars": MAX_RECEIPT_JSON_CHARS,
             "queryEmbeddingMs": round(query_embedding_ms, 4),
             "elapsedMs": round((time.perf_counter() - started) * 1000.0, 4),
             "modelId": backend.model_id,
@@ -215,20 +250,15 @@ def main() -> int:
             },
             "queries": rows,
         }
-        print(json.dumps(payload, separators=(",", ":"), sort_keys=True))
-        return 0
+        return emit(payload)
     except Exception as exc:
-        print(
-            json.dumps(
-                {
-                    "summary": f"Full-stream retrieval baseline failed: {type(exc).__name__}: {exc}",
-                    "elapsedMs": round((time.perf_counter() - started) * 1000.0, 4),
-                },
-                separators=(",", ":"),
-                sort_keys=True,
-            )
+        return emit(
+            {
+                "summary": f"Full-stream retrieval baseline failed: {type(exc).__name__}: {exc}",
+                "elapsedMs": round((time.perf_counter() - started) * 1000.0, 4),
+            },
+            1,
         )
-        return 1
 
 
 if __name__ == "__main__":
