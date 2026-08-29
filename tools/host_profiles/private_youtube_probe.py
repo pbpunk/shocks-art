@@ -14,6 +14,7 @@ CODE_ROOT = Path(__file__).resolve().parents[2]
 LIVE_ROOT = Path(os.getenv("SHOCKS_HOST_LIVE_ROOT", CODE_ROOT)).resolve()
 if str(CODE_ROOT) not in sys.path:
     sys.path.insert(0, str(CODE_ROOT))
+MAX_OWNER_DISCOVERY_VIDEOS = 200
 
 
 def emit(payload: dict[str, Any], code: int = 0) -> int:
@@ -54,28 +55,54 @@ def discover_private_owner_url() -> str:
             record = connected_credential(db)
             if record is None:
                 return ""
+            channel_id = str(record.channel_id or "")
             credentials = credentials_from_record(record)
     finally:
         os.chdir(previous_cwd)
 
     youtube = build("youtube", "v3", credentials=credentials, cache_discovery=False)
-    search_response = (
-        youtube.search()
-        .list(part="id", forMine=True, type="video", order="date", maxResults=25)
-        .execute()
-    )
-    search_items = list(search_response.get("items", []))
-    video_ids = [str(item.get("id", {}).get("videoId") or "") for item in search_items]
-    video_ids = [video_id for video_id in video_ids if video_id]
-    if not video_ids:
-        return ""
-    details_response = (
-        youtube.videos()
-        .list(part="status", id=",".join(video_ids[:25]), maxResults=25)
-        .execute()
-    )
-    video_id = choose_private_video_id(search_items, list(details_response.get("items", [])))
-    return f"https://www.youtube.com/watch?v={video_id}" if video_id else ""
+    channel_request = youtube.channels().list(part="contentDetails", maxResults=50, id=channel_id) if channel_id else youtube.channels().list(part="contentDetails", maxResults=50, mine=True)
+    channel_response = channel_request.execute()
+    uploads_playlists = [
+        str(item.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads") or "")
+        for item in channel_response.get("items", [])
+    ]
+    uploads_playlists = [playlist_id for playlist_id in uploads_playlists if playlist_id]
+    scanned = 0
+    for uploads_playlist in uploads_playlists:
+        page_token: str | None = None
+        while scanned < MAX_OWNER_DISCOVERY_VIDEOS:
+            remaining = MAX_OWNER_DISCOVERY_VIDEOS - scanned
+            response = (
+                youtube.playlistItems()
+                .list(
+                    part="contentDetails",
+                    playlistId=uploads_playlist,
+                    maxResults=min(50, remaining),
+                    pageToken=page_token,
+                )
+                .execute()
+            )
+            video_ids = [
+                str(item.get("contentDetails", {}).get("videoId") or "")
+                for item in response.get("items", [])
+            ]
+            video_ids = [video_id for video_id in video_ids if video_id]
+            scanned += len(video_ids)
+            if video_ids:
+                details_response = (
+                    youtube.videos()
+                    .list(part="status", id=",".join(video_ids), maxResults=len(video_ids))
+                    .execute()
+                )
+                ordered_items = [{"id": {"videoId": video_id}} for video_id in video_ids]
+                video_id = choose_private_video_id(ordered_items, list(details_response.get("items", [])))
+                if video_id:
+                    return f"https://www.youtube.com/watch?v={video_id}"
+            page_token = response.get("nextPageToken")
+            if not page_token or not video_ids:
+                break
+    return ""
 
 
 def resolve_probe_url() -> tuple[str, str]:
