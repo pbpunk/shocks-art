@@ -20,6 +20,12 @@ def test_prep_uses_production_native_ask_complete_status() -> None:
     assert 'AnalysisRun.status == "completed"' not in source
 
 
+def test_review_receipt_preserves_full_caption_seed() -> None:
+    source = (Path(__file__).resolve().parents[1] / "tools" / "host_profiles" / "whisper_benchmark_prepare.py").read_text(encoding="utf-8")
+    assert '"caption_text": case["caption_text"],' in source
+    assert 'case["caption_text"][:180]' not in source
+
+
 def test_review_draft_cannot_be_used_as_benchmark_ground_truth() -> None:
     draft = {
         "review_required": True,
