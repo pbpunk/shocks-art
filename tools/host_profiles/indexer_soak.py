@@ -165,18 +165,35 @@ def enqueue_probe() -> str:
     return str(payload.get("job", {}).get("jobId") or "")
 
 
-def wait_for_job(job_id: str, timeout: int = 90) -> tuple[str, dict[str, Any]]:
+def wait_for_job_with_health(job_id: str, timeout: int = 90) -> tuple[str, dict[str, Any], dict[str, Any]]:
     deadline = time.monotonic() + timeout
+    overlap = {
+        "saw_running": False,
+        "running_health_checks": 0,
+        "running_health_failures": 0,
+    }
     while time.monotonic() < deadline:
         ok, payload = queue_snapshot()
         if ok:
             for job in payload.get("jobs", []):
-                if str(job.get("jobId")) == job_id:
-                    status = str(job.get("status") or "")
-                    if status in {"completed", "failed", "cancelled"}:
-                        return status, job
-        time.sleep(2)
-    return "timeout", {}
+                if str(job.get("jobId")) != job_id:
+                    continue
+                status = str(job.get("status") or "")
+                if status == "running":
+                    overlap["saw_running"] = True
+                    health_status, health, _ = request_json("/health", timeout=5)
+                    overlap["running_health_checks"] += 1
+                    if health_status != 200 or health.get("app") != "shocks-art":
+                        overlap["running_health_failures"] += 1
+                if status in {"completed", "failed", "cancelled"}:
+                    return status, job, overlap
+                break
+        time.sleep(0.25)
+    return "timeout", {}, overlap
+
+
+def empty_overlap() -> dict[str, Any]:
+    return {"saw_running": False, "running_health_checks": 0, "running_health_failures": 0}
 
 
 def live_worker_present() -> tuple[bool, dict[str, Any] | None]:
@@ -200,7 +217,9 @@ def main() -> int:
 
     worker_before, worker_before_detail = live_worker_present()
     first_job_id = enqueue_probe() if worker_before else ""
-    first_job_status, first_job = wait_for_job(first_job_id) if first_job_id else ("not-enqueued", {})
+    first_job_status, first_job, first_overlap = (
+        wait_for_job_with_health(first_job_id) if first_job_id else ("not-enqueued", {}, empty_overlap())
+    )
 
     stop_ok, stop_output = run_ps1("stop_indexer_worker.ps1")
     worker_stopped, _ = live_worker_present()
@@ -209,7 +228,9 @@ def main() -> int:
     time.sleep(3)
     worker_after, worker_after_detail = live_worker_present()
     second_job_id = enqueue_probe() if worker_after else ""
-    second_job_status, second_job = wait_for_job(second_job_id) if second_job_id else ("not-enqueued", {})
+    second_job_status, second_job, second_overlap = (
+        wait_for_job_with_health(second_job_id) if second_job_id else ("not-enqueued", {}, empty_overlap())
+    )
 
     while time.monotonic() - started < DURATION:
         elapsed = time.monotonic() - started
@@ -262,12 +283,15 @@ def main() -> int:
     trace_inventory_ok = int(traces.get("total") or 0) > 0
     redundancy_ok = bool(redundancy.get("available"))
 
+    running_health_checks = int(first_overlap["running_health_checks"]) + int(second_overlap["running_health_checks"])
+    running_health_failures = int(first_overlap["running_health_failures"]) + int(second_overlap["running_health_failures"])
+    concurrent_web_ok = running_health_checks > 0 and running_health_failures == 0
     health_ok = health_checks > 0 and health_failures == 0
     search_ok = bool(search_measurements) and search_failures == 0
     queue_ok = first_job_status == "completed" and second_job_status == "completed"
     restart_ok = stop_ok and start_ok and worker_after
     scratch_ok = scratch_is_clean(scratch_initial, final_scratch)
-    ok = worker_before and queue_ok and restart_ok and health_ok and search_ok and scratch_ok and trace_inventory_ok and redundancy_ok
+    ok = worker_before and queue_ok and restart_ok and health_ok and concurrent_web_ok and search_ok and scratch_ok and trace_inventory_ok and redundancy_ok
     request_latencies = [float(item["request_seconds"]) for item in search_measurements]
     return emit(
         {
@@ -293,11 +317,21 @@ def main() -> int:
                 "first_job_id": first_job_id,
                 "first_status": first_job_status,
                 "first_result": first_job.get("result", {}),
+                "first_overlap": first_overlap,
                 "second_job_id": second_job_id,
                 "second_status": second_job_status,
                 "second_result": second_job.get("result", {}),
+                "second_overlap": second_overlap,
             },
-            "health": {"checks": health_checks, "failures": health_failures},
+            "health": {
+                "checks": health_checks,
+                "failures": health_failures,
+                "during_running_jobs": {
+                    "checks": running_health_checks,
+                    "failures": running_health_failures,
+                    "passed": concurrent_web_ok,
+                },
+            },
             "trace_volume": traces,
             "semantic_search": {
                 "checks": len(search_measurements) + search_failures,
