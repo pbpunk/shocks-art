@@ -374,7 +374,7 @@ def main() -> int:
             "source_video_id": case["source"]["source_video_id"],
             "start_seconds": case["source"]["start_seconds"],
             "end_seconds": case["source"]["end_seconds"],
-            "caption_text": case["caption_text"][:180],
+            "caption_text": case["caption_text"],
             "suggested_project_terms": case["suggested_project_terms"],
             "audio_source": case["audio_source"],
         }
