@@ -87,3 +87,35 @@ def test_owner_discovery_uses_bounded_uploads_playlist_not_search() -> None:
     assert probe.MAX_OWNER_DISCOVERY_VIDEOS == 200
     assert ".playlistItems()" in source
     assert ".search()" not in source
+
+
+def test_probe_uses_shared_production_ytdlp_primitives_only() -> None:
+    source = (Path(__file__).resolve().parents[1] / "tools" / "host_profiles" / "private_youtube_probe.py").read_text(encoding="utf-8")
+
+    assert "fetch_youtube_metadata" in source
+    assert "download_youtube_section" in source
+    assert "download_youtube_source" in source
+    assert "subprocess" not in source
+    assert "--cookies-from-browser" not in source
+    assert "--download-sections" not in source
+
+
+def test_safe_ytdlp_failure_never_includes_provider_detail() -> None:
+    payload = probe.safe_ytdlp_failure(
+        "metadata",
+        source_mode="owner-oauth-private-upload",
+        video_id="private123",
+        elapsed_seconds=1.2345,
+    )
+
+    assert payload == {
+        "summary": "Private YouTube metadata probe failed",
+        "failure_stage": "metadata",
+        "source_mode": "owner-oauth-private-upload",
+        "error_type": "YtDlpError",
+        "credentials_emitted": False,
+        "signed_urls_emitted": False,
+        "video_id": "private123",
+        "metadata_seconds": 1.234,
+    }
+    assert "error_tail" not in payload
