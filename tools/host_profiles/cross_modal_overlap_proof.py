@@ -12,6 +12,7 @@ from typing import Any
 from sqlalchemy import func, select
 
 LIVE_ROOT = Path(os.getenv("SHOCKS_HOST_LIVE_ROOT", Path(__file__).resolve().parents[2])).resolve()
+os.chdir(LIVE_ROOT)
 if str(LIVE_ROOT) not in sys.path:
     sys.path.insert(0, str(LIVE_ROOT))
 
