@@ -42,6 +42,7 @@ def test_resolve_probe_url_prefers_fixed_host_configuration(monkeypatch) -> None
     assert probe.resolve_probe_url() == (
         "https://www.youtube.com/watch?v=fixed123",
         "configured-host-url",
+        "",
     )
 
 
@@ -56,14 +57,28 @@ def test_resolve_probe_url_falls_back_to_private_owner_upload(monkeypatch) -> No
     assert probe.resolve_probe_url() == (
         "https://www.youtube.com/watch?v=private123",
         "owner-oauth-private-upload",
+        "",
     )
 
 
-def test_resolve_probe_url_fails_closed_when_discovery_is_unavailable(monkeypatch) -> None:
+def test_resolve_probe_url_preserves_known_discovery_blocker(monkeypatch) -> None:
     monkeypatch.delenv("SHOCKS_PRIVATE_YOUTUBE_TEST_URL", raising=False)
-    monkeypatch.setattr(probe, "discover_private_owner_url", lambda: "")
 
-    assert probe.resolve_probe_url() == ("", "unavailable")
+    def unavailable() -> str:
+        raise probe.PrivateSourceDiscoveryUnavailable("owner_oauth_not_connected")
+
+    monkeypatch.setattr(probe, "discover_private_owner_url", unavailable)
+    assert probe.resolve_probe_url() == ("", "unavailable", "owner_oauth_not_connected")
+
+
+def test_resolve_probe_url_reports_only_unexpected_error_type(monkeypatch) -> None:
+    monkeypatch.delenv("SHOCKS_PRIVATE_YOUTUBE_TEST_URL", raising=False)
+
+    def broken() -> str:
+        raise RuntimeError("secret-bearing provider detail must not enter receipt")
+
+    monkeypatch.setattr(probe, "discover_private_owner_url", broken)
+    assert probe.resolve_probe_url() == ("", "unavailable", "discovery_error_type=RuntimeError")
 
 
 def test_owner_discovery_uses_bounded_uploads_playlist_not_search() -> None:
