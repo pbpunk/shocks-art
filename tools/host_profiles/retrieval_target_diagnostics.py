@@ -5,7 +5,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from sqlalchemy import func, select
 
@@ -17,6 +17,13 @@ if str(LIVE_ROOT) not in sys.path:
 from app.core.database import SessionLocal
 from app.indexing.language_search import LanguageSearchMatch, search_language_traces
 from app.indexing.qwen_query_backend import QwenPersistentQueryEmbeddingBackend
+from app.indexing.retrieval_diagnostics import (
+    CANDIDATE_DEPTHS,
+    depth_flags,
+    nearest_language,
+    nearest_visual,
+    ranked_target,
+)
 from app.indexing.retrieval_fusion import temporal_gap_ms
 from app.indexing.visual_search import VisualSearchMatch, search_visual_embeddings
 from app.library_models import Embedding, Media, Trace
@@ -42,7 +49,6 @@ TARGETS: tuple[dict[str, str], ...] = (
 LANGUAGE_K = 500
 VISUAL_K = 5000
 ANCHOR_LIMIT = 5
-CANDIDATE_DEPTHS = (25, 50, 100)
 
 
 def emit(payload: dict[str, Any], code: int = 0) -> int:
@@ -50,84 +56,12 @@ def emit(payload: dict[str, Any], code: int = 0) -> int:
     return code
 
 
-def _ranked_target(matches: Iterable[Any], media_id: str) -> list[tuple[int, Any]]:
-    return [
-        (rank, match)
-        for rank, match in enumerate(matches, start=1)
-        if match.media_id == media_id
-    ]
-
-
-def _nearest_visual(
-    language: LanguageSearchMatch,
-    ranked_visual: list[tuple[int, VisualSearchMatch]],
-) -> tuple[int, VisualSearchMatch, int] | None:
-    if not ranked_visual:
-        return None
-    rank, match = min(
-        ranked_visual,
-        key=lambda item: (
-            temporal_gap_ms(
-                language.start_ms,
-                language.end_ms,
-                item[1].start_ms,
-                item[1].end_ms,
-            ),
-            item[0],
-        ),
-    )
-    return (
-        rank,
-        match,
-        temporal_gap_ms(
-            language.start_ms,
-            language.end_ms,
-            match.start_ms,
-            match.end_ms,
-        ),
-    )
-
-
-def _nearest_language(
-    visual: VisualSearchMatch,
-    ranked_language: list[tuple[int, LanguageSearchMatch]],
-) -> tuple[int, LanguageSearchMatch, int] | None:
-    if not ranked_language:
-        return None
-    rank, match = min(
-        ranked_language,
-        key=lambda item: (
-            temporal_gap_ms(
-                item[1].start_ms,
-                item[1].end_ms,
-                visual.start_ms,
-                visual.end_ms,
-            ),
-            item[0],
-        ),
-    )
-    return (
-        rank,
-        match,
-        temporal_gap_ms(
-            match.start_ms,
-            match.end_ms,
-            visual.start_ms,
-            visual.end_ms,
-        ),
-    )
-
-
-def _depth_flags(rank: int) -> dict[str, bool]:
-    return {f"withinTop{depth}": rank <= depth for depth in CANDIDATE_DEPTHS}
-
-
 def _language_anchor_payload(
     rank: int,
     match: LanguageSearchMatch,
-    ranked_visual: list[tuple[int, VisualSearchMatch]],
+    ranked_visual_matches: list[tuple[int, VisualSearchMatch]],
 ) -> dict[str, Any]:
-    nearest = _nearest_visual(match, ranked_visual)
+    nearest = nearest_visual(match, ranked_visual_matches)
     nearest_payload: dict[str, Any] | None = None
     if nearest is not None:
         visual_rank, visual, gap_ms = nearest
@@ -138,7 +72,7 @@ def _language_anchor_payload(
             "endMs": visual.end_ms,
             "score": round(visual.score, 8),
             "gapMs": gap_ms,
-            **_depth_flags(visual_rank),
+            **depth_flags(visual_rank),
         }
     return {
         "globalRank": rank,
@@ -148,7 +82,7 @@ def _language_anchor_payload(
         "score": round(match.score, 8),
         "matchedTerms": list(match.matched_terms),
         "text": match.text[:320],
-        **_depth_flags(rank),
+        **depth_flags(rank),
         "nearestVisual": nearest_payload,
     }
 
@@ -156,9 +90,9 @@ def _language_anchor_payload(
 def _visual_anchor_payload(
     rank: int,
     match: VisualSearchMatch,
-    ranked_language: list[tuple[int, LanguageSearchMatch]],
+    ranked_language_matches: list[tuple[int, LanguageSearchMatch]],
 ) -> dict[str, Any]:
-    nearest = _nearest_language(match, ranked_language)
+    nearest = nearest_language(match, ranked_language_matches)
     nearest_payload: dict[str, Any] | None = None
     if nearest is not None:
         language_rank, language, gap_ms = nearest
@@ -171,7 +105,7 @@ def _visual_anchor_payload(
             "matchedTerms": list(language.matched_terms),
             "text": language.text[:320],
             "gapMs": gap_ms,
-            **_depth_flags(language_rank),
+            **depth_flags(language_rank),
         }
     return {
         "globalRank": rank,
@@ -179,27 +113,33 @@ def _visual_anchor_payload(
         "startMs": match.start_ms,
         "endMs": match.end_ms,
         "score": round(match.score, 8),
-        **_depth_flags(rank),
+        **depth_flags(rank),
         "nearestLanguage": nearest_payload,
     }
 
 
 def _best_temporal_pair(
-    ranked_language: list[tuple[int, LanguageSearchMatch]],
-    ranked_visual: list[tuple[int, VisualSearchMatch]],
+    ranked_language_matches: list[tuple[int, LanguageSearchMatch]],
+    ranked_visual_matches: list[tuple[int, VisualSearchMatch]],
 ) -> dict[str, Any] | None:
-    if not ranked_language or not ranked_visual:
+    if not ranked_language_matches or not ranked_visual_matches:
         return None
     language_rank, language, visual_rank, visual, gap_ms = min(
         (
-            (language_rank, language, visual_rank, visual, temporal_gap_ms(
-                language.start_ms,
-                language.end_ms,
-                visual.start_ms,
-                visual.end_ms,
-            ))
-            for language_rank, language in ranked_language
-            for visual_rank, visual in ranked_visual
+            (
+                language_rank,
+                language,
+                visual_rank,
+                visual,
+                temporal_gap_ms(
+                    language.start_ms,
+                    language.end_ms,
+                    visual.start_ms,
+                    visual.end_ms,
+                ),
+            )
+            for language_rank, language in ranked_language_matches
+            for visual_rank, visual in ranked_visual_matches
         ),
         key=lambda item: (item[4], item[0] + item[2], item[0], item[2]),
     )
@@ -213,7 +153,7 @@ def _best_temporal_pair(
             "score": round(language.score, 8),
             "matchedTerms": list(language.matched_terms),
             "text": language.text[:320],
-            **_depth_flags(language_rank),
+            **depth_flags(language_rank),
         },
         "visual": {
             "globalRank": visual_rank,
@@ -221,7 +161,7 @@ def _best_temporal_pair(
             "startMs": visual.start_ms,
             "endMs": visual.end_ms,
             "score": round(visual.score, 8),
-            **_depth_flags(visual_rank),
+            **depth_flags(visual_rank),
         },
     }
 
@@ -263,11 +203,7 @@ def main() -> int:
                 if media.source_type != "youtube":
                     return emit({"summary": "Fixed retrieval diagnostic Media is not canonical YouTube Media", "queryId": target["queryId"]}, 1)
 
-                language = search_language_traces(
-                    db,
-                    query=target["query"],
-                    top_k=LANGUAGE_K,
-                )
+                language = search_language_traces(db, query=target["query"], top_k=LANGUAGE_K)
                 visual = search_visual_embeddings(
                     db,
                     query_vector=vector,
@@ -275,15 +211,15 @@ def main() -> int:
                     dimension=backend.dimension,
                     top_k=VISUAL_K,
                 )
-                ranked_language = _ranked_target(language.matches, media_id)
-                ranked_visual = _ranked_target(visual.matches, media_id)
-                if not ranked_language or not ranked_visual:
+                ranked_language_matches = ranked_target(language.matches, media_id)
+                ranked_visual_matches = ranked_target(visual.matches, media_id)
+                if not ranked_language_matches or not ranked_visual_matches:
                     return emit(
                         {
                             "summary": "Fixed retrieval diagnostic target lacks query-visible evidence",
                             "queryId": target["queryId"],
-                            "targetLanguageMatches": len(ranked_language),
-                            "targetVisualMatches": len(ranked_visual),
+                            "targetLanguageMatches": len(ranked_language_matches),
+                            "targetVisualMatches": len(ranked_visual_matches),
                         },
                         1,
                     )
@@ -295,8 +231,8 @@ def main() -> int:
                         "mediaId": media_id,
                         "languageGlobalCount": len(language.matches),
                         "visualGlobalCount": len(visual.matches),
-                        "targetLanguageMatchCount": len(ranked_language),
-                        "targetVisualMatchCount": len(ranked_visual),
+                        "targetLanguageMatchCount": len(ranked_language_matches),
+                        "targetVisualMatchCount": len(ranked_visual_matches),
                         "exactGenerationVisualEmbeddings": _exact_visual_count(
                             db,
                             media_id=media_id,
@@ -304,22 +240,25 @@ def main() -> int:
                             dimension=backend.dimension,
                         ),
                         "primaryLanguageAnchor": _language_anchor_payload(
-                            *ranked_language[0],
-                            ranked_visual,
+                            *ranked_language_matches[0],
+                            ranked_visual_matches,
                         ),
                         "primaryVisualAnchor": _visual_anchor_payload(
-                            *ranked_visual[0],
-                            ranked_language,
+                            *ranked_visual_matches[0],
+                            ranked_language_matches,
                         ),
                         "languageAnchors": [
-                            _language_anchor_payload(rank, match, ranked_visual)
-                            for rank, match in ranked_language[:ANCHOR_LIMIT]
+                            _language_anchor_payload(rank, match, ranked_visual_matches)
+                            for rank, match in ranked_language_matches[:ANCHOR_LIMIT]
                         ],
                         "visualAnchors": [
-                            _visual_anchor_payload(rank, match, ranked_language)
-                            for rank, match in ranked_visual[:ANCHOR_LIMIT]
+                            _visual_anchor_payload(rank, match, ranked_language_matches)
+                            for rank, match in ranked_visual_matches[:ANCHOR_LIMIT]
                         ],
-                        "bestTemporalPair": _best_temporal_pair(ranked_language, ranked_visual),
+                        "bestTemporalPair": _best_temporal_pair(
+                            ranked_language_matches,
+                            ranked_visual_matches,
+                        ),
                     }
                 )
 
