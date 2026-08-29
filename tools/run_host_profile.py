@@ -14,6 +14,7 @@ from app.host_bridge import HOST_PROFILES, validate_profile
 
 PROFILE_SCRIPTS = {
     "whisper-benchmark": ROOT / "tools" / "host_profiles" / "whisper_benchmark.py",
+    "whisper-benchmark-prepare": ROOT / "tools" / "host_profiles" / "whisper_benchmark_prepare.py",
     "private-youtube-probe": ROOT / "tools" / "host_profiles" / "private_youtube_probe.py",
     "indexer-soak": ROOT / "tools" / "host_profiles" / "indexer_soak.py",
     "clips-native-ask-smoke": ROOT / "tools" / "host_profiles" / "clips_native_ask_smoke.py",
@@ -42,6 +43,7 @@ PROFILE_TIMEOUT_SECONDS = {
     "derived-data-reinitialize": 7200,
     "derived-data-resume": 7200,
     "whisper-benchmark": 7200,
+    "whisper-benchmark-prepare": 3600,
 }
 
 
