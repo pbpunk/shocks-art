@@ -35,15 +35,38 @@ def _executable() -> str:
     return executable
 
 
+def _trusted_host_value(name: str, default: str) -> str:
+    inherited = os.getenv(name)
+    if inherited is not None:
+        return inherited
+
+    env_path = ROOT_DIR / ".env"
+    try:
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return default
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        if key.strip() == name:
+            return value.strip().strip('"').strip("'")
+    return default
+
+
 def browser_cookie_args() -> tuple[str, ...]:
     """Return workstation-owned browser authentication args.
 
     An explicitly blank SHOCKS_YTDLP_COOKIES_FROM_BROWSER disables browser-cookie
     auth. Otherwise the historical workstation default is Chrome. The value is
     trusted host configuration and is never supplied through the Google Sheet.
+    Reading the trusted local .env here keeps the web app, offline indexer, and
+    host verifier on the same acquisition policy even when their launch parents
+    inherit different environment variables.
     """
 
-    browser = os.getenv("SHOCKS_YTDLP_COOKIES_FROM_BROWSER", DEFAULT_COOKIE_BROWSER).strip()
+    browser = _trusted_host_value("SHOCKS_YTDLP_COOKIES_FROM_BROWSER", DEFAULT_COOKIE_BROWSER).strip()
     return ("--cookies-from-browser", browser) if browser else ()
 
 
@@ -178,7 +201,7 @@ def fetch_youtube_metadata(*, url: str, timeout: int = 120) -> dict[str, Any]:
             continue
         try:
             payload = json.loads(result.stdout)
-        except json.JSONDecodeError as exc:
+        except json.JSONDecodeError:
             last_error = YtDlpError("yt-dlp metadata output was not valid JSON")
             continue
         if isinstance(payload, dict):
