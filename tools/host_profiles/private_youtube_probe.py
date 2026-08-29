@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -20,11 +21,7 @@ from app.services.ytdlp import (
     fetch_youtube_metadata,
 )
 
-MAX_OWNER_DISCOVERY_VIDEOS = 200
-
-
-class PrivateSourceDiscoveryUnavailable(RuntimeError):
-    pass
+OWNER_DISCOVERY_HELPER = CODE_ROOT / "tools" / "host_profiles" / "private_youtube_owner_discovery.py"
 
 
 def emit(payload: dict[str, Any], code: int = 0) -> int:
@@ -32,103 +29,57 @@ def emit(payload: dict[str, Any], code: int = 0) -> int:
     return code
 
 
-def choose_private_video_id(search_items: list[dict[str, Any]], detail_items: list[dict[str, Any]]) -> str:
-    ordered_ids = [str(item.get("id", {}).get("videoId") or "") for item in search_items]
-    details = {str(item.get("id") or ""): item for item in detail_items}
-    for video_id in ordered_ids:
-        if not video_id:
-            continue
-        status = details.get(video_id, {}).get("status", {})
-        if str(status.get("privacyStatus") or "").lower() != "private":
-            continue
-        upload_status = str(status.get("uploadStatus") or "").lower()
-        if upload_status and upload_status != "processed":
-            continue
-        return video_id
-    return ""
+def discover_private_owner_video_id() -> tuple[str, str]:
+    """Discover one private owner upload in a fresh live-root interpreter.
 
+    OAuth/database state belongs to the deployed checkout. Candidate retrieval
+    code stays in this interpreter, while a fixed helper subprocess prevents
+    Python's module cache from mixing candidate app modules with live config.
+    """
 
-def discover_private_owner_url() -> str:
-    from googleapiclient.discovery import build
-
-    previous_cwd = Path.cwd()
+    env = os.environ.copy()
+    env["SHOCKS_HOST_LIVE_ROOT"] = str(LIVE_ROOT)
     try:
-        os.chdir(LIVE_ROOT)
-        from app.core.database import SessionLocal
-        from app.services.youtube_analytics import connected_credential, credentials_from_record
+        result = subprocess.run(
+            [sys.executable, str(OWNER_DISCOVERY_HELPER)],
+            cwd=CODE_ROOT,
+            env=env,
+            text=True,
+            capture_output=True,
+            timeout=120,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        return "", "owner_discovery_timeout"
 
-        with SessionLocal() as db:
-            record = connected_credential(db)
-            if record is None:
-                raise PrivateSourceDiscoveryUnavailable("owner_oauth_not_connected")
-            channel_id = str(record.channel_id or "")
-            credentials = credentials_from_record(record)
-    finally:
-        os.chdir(previous_cwd)
-
-    youtube = build("youtube", "v3", credentials=credentials, cache_discovery=False)
-    channel_request = (
-        youtube.channels().list(part="contentDetails", maxResults=50, id=channel_id)
-        if channel_id
-        else youtube.channels().list(part="contentDetails", maxResults=50, mine=True)
-    )
-    channel_response = channel_request.execute()
-    uploads_playlists = [
-        str(item.get("contentDetails", {}).get("relatedPlaylists", {}).get("uploads") or "")
-        for item in channel_response.get("items", [])
-    ]
-    uploads_playlists = [playlist_id for playlist_id in uploads_playlists if playlist_id]
-    if not uploads_playlists:
-        raise PrivateSourceDiscoveryUnavailable("owner_uploads_playlist_unavailable")
-
-    scanned = 0
-    for uploads_playlist in uploads_playlists:
-        page_token: str | None = None
-        while scanned < MAX_OWNER_DISCOVERY_VIDEOS:
-            remaining = MAX_OWNER_DISCOVERY_VIDEOS - scanned
-            response = (
-                youtube.playlistItems()
-                .list(
-                    part="contentDetails",
-                    playlistId=uploads_playlist,
-                    maxResults=min(50, remaining),
-                    pageToken=page_token,
-                )
-                .execute()
-            )
-            video_ids = [
-                str(item.get("contentDetails", {}).get("videoId") or "")
-                for item in response.get("items", [])
-            ]
-            video_ids = [video_id for video_id in video_ids if video_id]
-            scanned += len(video_ids)
-            if video_ids:
-                details_response = (
-                    youtube.videos()
-                    .list(part="status", id=",".join(video_ids), maxResults=len(video_ids))
-                    .execute()
-                )
-                ordered_items = [{"id": {"videoId": video_id}} for video_id in video_ids]
-                video_id = choose_private_video_id(ordered_items, list(details_response.get("items", [])))
-                if video_id:
-                    return f"https://www.youtube.com/watch?v={video_id}"
-            page_token = response.get("nextPageToken")
-            if not page_token or not video_ids:
-                break
-    raise PrivateSourceDiscoveryUnavailable(f"no_private_processed_upload_in_first_{scanned}_owner_uploads")
+    payload: dict[str, Any] = {}
+    if result.stdout:
+        try:
+            parsed = json.loads(result.stdout.strip().splitlines()[-1])
+            if isinstance(parsed, dict):
+                payload = parsed
+        except (json.JSONDecodeError, IndexError):
+            payload = {}
+    if result.returncode == 0 and payload.get("ok") is True:
+        video_id = str(payload.get("video_id") or "").strip()
+        if video_id:
+            return video_id, ""
+        return "", "owner_discovery_empty_video_id"
+    status = str(payload.get("status") or "")
+    if status:
+        return "", status[:200]
+    return "", f"owner_discovery_exit_{result.returncode}"
 
 
 def resolve_probe_url() -> tuple[str, str, str]:
     configured = os.getenv("SHOCKS_PRIVATE_YOUTUBE_TEST_URL", "").strip()
     if configured:
         return configured, "configured-host-url", ""
-    try:
-        discovered = discover_private_owner_url()
-    except PrivateSourceDiscoveryUnavailable as exc:
-        return "", "unavailable", str(exc)
-    except Exception as exc:
-        return "", "unavailable", f"discovery_error_type={type(exc).__name__}"
-    return (discovered, "owner-oauth-private-upload", "") if discovered else ("", "unavailable", "no_private_owner_upload")
+    video_id, status = discover_private_owner_video_id()
+    if not video_id:
+        return "", "unavailable", status or "no_private_owner_upload"
+    return f"https://www.youtube.com/watch?v={video_id}", "owner-oauth-private-upload", ""
 
 
 def safe_ytdlp_failure(stage: str, *, source_mode: str, video_id: str = "", elapsed_seconds: float | None = None) -> dict[str, Any]:
@@ -264,6 +215,7 @@ def main() -> int:
             },
             "production_materialization_path_proven": True,
             "authentication_policy": "shared-production-ytdlp",
+            "owner_discovery_isolated": source_mode == "owner-oauth-private-upload",
             "fallback": "If bounded section retrieval is unreliable for a private source, materialize the full source through the production MediaRetriever scratch lease and delete it after use.",
             "credentials_emitted": False,
             "signed_urls_emitted": False,
