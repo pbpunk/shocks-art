@@ -18,6 +18,7 @@ from app.host_bridge import (
 def test_host_profiles_are_fixed_and_narrow() -> None:
     assert HOST_PROFILES == (
         "whisper-benchmark",
+        "whisper-benchmark-prepare",
         "private-youtube-probe",
         "indexer-soak",
         "clips-native-ask-smoke",
@@ -42,6 +43,7 @@ def test_host_profiles_are_fixed_and_narrow() -> None:
     assert profile_policy("retrieval-coverage-expand") == "main-only"
     assert profile_policy("retrieval-target-diagnostics") == "main-only"
     assert profile_policy("retrieval-depth-sweep") == "main-only"
+    assert profile_policy("whisper-benchmark-prepare") == "main-only"
     assert profile_policy("whisper-benchmark") == "candidate-or-main"
     assert profile_policy("repo-tests") == "candidate-or-main"
 
