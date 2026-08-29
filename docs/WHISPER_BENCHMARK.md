@@ -24,9 +24,24 @@ When a reviewed `manifest.json` does not already exist, the profile:
 - prefers existing derived-clip or source-video caches and otherwise requests only the bounded YouTube time section;
 - writes `data/whisper_benchmark/manifest.draft.json` with source lineage, source-backed `caption_text`, and suggested project terms.
 
-The draft is **not benchmark ground truth**. It deliberately omits the runnable manifest's required `reference_text` and `project_terms`. A human must listen to each WAV, correct the exact spoken text, choose the unusual terms that truly matter, and create `manifest.json`. The normal manifest validator therefore rejects the draft if it is accidentally supplied to `whisper-benchmark`.
+The draft is **not benchmark ground truth**. It deliberately omits the runnable manifest's required `reference_text` and `project_terms`. A human must listen to each WAV, correct the exact spoken text, and choose the unusual terms that truly matter. The normal manifest validator therefore rejects the draft if it is accidentally supplied to `whisper-benchmark`.
 
 The prep profile never overwrites an existing reviewed `manifest.json` and is main-only because it writes ignored workstation corpus files.
+
+## Human review and finalization
+
+The durable control spreadsheet contains a `Whisper Review` tab populated from the prepared draft. Each row has the exact source time link, the source-backed auto-caption review seed, suggested terms, blank `Verified reference_text` / `Verified project_terms` cells, and a review status.
+
+For every prepared case, a human reviewer must:
+
+1. open the exact source window and listen to the spoken audio;
+2. enter the corrected spoken transcript in `Verified reference_text`;
+3. enter comma-separated unusual terms that are actually spoken in `Verified project_terms`;
+4. set `Status` to `Reviewed` only after those checks are complete.
+
+The fixed main-only `whisper-benchmark-finalize` host profile performs the conversion to runnable ground truth. It reads the review sheet and local draft, requires an exact one-to-one case-ID match, requires **every** prepared case to be marked `Reviewed` with non-empty verified text and terms, verifies the referenced local media exists, validates the final manifest with the same parser used by the benchmark, and then atomically writes `data/whisper_benchmark/manifest.json`.
+
+It fails closed when any review is incomplete or mismatched and never substitutes `caption_text` or suggested terms for the verified fields. It also never overwrites an existing reviewed manifest.
 
 ## What to label
 
