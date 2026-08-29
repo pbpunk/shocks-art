@@ -37,7 +37,7 @@ def test_semantic_search_measurement_keeps_model_and_vector_latency_separate() -
             "result": {
                 "elapsedMs": 43.21987,
                 "databaseMs": 9.87654,
-                "scoringMs": 33.12345,
+                "scoringMs": 33.12346,
                 "vectorCount": 321,
             },
         },
