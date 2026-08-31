@@ -18,7 +18,7 @@ PROFILE_SCRIPTS = {
     "whisper-benchmark-prepare": ROOT / "tools" / "host_profiles" / "whisper_benchmark_prepare.py",
     "whisper-benchmark-finalize": ROOT / "tools" / "host_profiles" / "whisper_benchmark_finalize.py",
     "private-youtube-probe": ROOT / "tools" / "host_profiles" / "private_youtube_probe.py",
-    "indexer-soak": ROOT / "tools" / "host_profiles" / "indexer_soak.py",
+    "indexer-soak": ROOT / "tools" / "host_profiles" / "indexer_soak_guarded.py",
     "clips-native-ask-smoke": ROOT / "tools" / "host_profiles" / "clips_native_ask_smoke.py",
     "clips-native-ask-rerun": ROOT / "tools" / "host_profiles" / "clips_native_ask_rerun.py",
     "derived-data-reinitialize": ROOT / "tools" / "host_profiles" / "derived_data_reinitialize.py",
