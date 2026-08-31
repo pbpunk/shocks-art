@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +50,12 @@ PROFILE_TIMEOUT_SECONDS = {
 }
 
 
+def _read_text(stream) -> str:
+    stream.flush()
+    stream.seek(0)
+    return stream.read().decode("utf-8", errors="replace")
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         print(json.dumps({"summary": f"usage: {Path(sys.argv[0]).name} <{'|'.join(HOST_PROFILES)}>"}))
@@ -59,19 +66,35 @@ def main() -> int:
     if profile == "whisper-benchmark" and os.getenv("SHOCKS_WHISPER_PYTHON", "").strip():
         python = os.environ["SHOCKS_WHISPER_PYTHON"].strip()
     timeout = PROFILE_TIMEOUT_SECONDS[profile]
-    try:
-        result = subprocess.run(
-            [python, str(script)], cwd=ROOT, env=os.environ.copy(), text=True,
-            capture_output=True, check=False, timeout=timeout,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
-    except subprocess.TimeoutExpired:
-        print(json.dumps({"summary": f"{profile} exceeded its fixed {timeout}-second execution budget", "timed_out": True, "timeout_seconds": timeout}))
-        return 124
-    if result.stderr:
-        print(result.stderr, file=sys.stderr, end="")
-    if result.stdout:
-        print(result.stdout, end="")
+
+    # Use real temporary files rather than subprocess.PIPE. Some Windows host profiles
+    # deliberately start long-lived detached child processes. If any descendant retains
+    # an inherited pipe handle, subprocess.communicate() can wait for EOF even after the
+    # profile process itself exits. File-backed capture has no EOF dependency on descendants.
+    with tempfile.TemporaryFile() as stdout_file, tempfile.TemporaryFile() as stderr_file:
+        try:
+            result = subprocess.run(
+                [python, str(script)], cwd=ROOT, env=os.environ.copy(),
+                stdout=stdout_file, stderr=stderr_file, check=False, timeout=timeout,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+        except subprocess.TimeoutExpired:
+            stderr_text = _read_text(stderr_file)
+            if stderr_text:
+                print(stderr_text, file=sys.stderr, end="")
+            stdout_text = _read_text(stdout_file)
+            if stdout_text:
+                print(stdout_text, end="")
+            print(json.dumps({"summary": f"{profile} exceeded its fixed {timeout}-second execution budget", "timed_out": True, "timeout_seconds": timeout}))
+            return 124
+
+        stderr_text = _read_text(stderr_file)
+        stdout_text = _read_text(stdout_file)
+
+    if stderr_text:
+        print(stderr_text, file=sys.stderr, end="")
+    if stdout_text:
+        print(stdout_text, end="")
     return result.returncode
 
 
