@@ -7,7 +7,7 @@
   "repository": "https://github.com/pbpunk/shocks-art",
   "status": "active",
   "authoritative": true,
-  "updatedAt": "2026-08-28",
+  "updatedAt": "2026-08-31",
   "goal": "Find -> Judge -> Pull -> Edit: semantic search returns useful named, spoken, visual, and silent footage with inspectable provenance; production Clips are derived only from YouTube native Ask.",
   "executionLegend": {
     "github": "Repository implementation/tests.",
@@ -69,6 +69,11 @@
       "id": "K-011",
       "title": "Interactive Qwen query runtime proven",
       "detail": "Exact deployed production main 14f9fe9787d44b6fb9e40d0f12c7c60ef01bdab6 wires Library semantic queries to the persistent isolated Qwen worker. Final live receipt retrieval-quality-production-warm-14f9fe97 measured five-query embedding at 560.7651 ms and total retrieval at 15679.9248 ms with model identity, rankings/scores, and metadata isolation unchanged; the earlier cold-to-warm proof on 8186f45d measured 279987.1706 -> 704.2648 ms."
+    },
+    {
+      "id": "K-012",
+      "title": "Indexer lifecycle proven",
+      "detail": "Exact deployed main 0ce0ad68020b66874ef899097085ead9b2b6aa0b passed the bounded 900-second restart/recovery/contention soak with 86/86 health checks, clean scratch, 49,613 Traces, isolated query/vector timings, and representative long-form visual-redundancy measurements."
     }
   ],
   "unknowns": [
@@ -89,18 +94,6 @@
       "title": "Private YouTube retrieval",
       "detail": "Authenticated private-source throughput and range reliability remain unproven.",
       "resolutionItems": ["IDX-038"]
-    },
-    {
-      "id": "U-004",
-      "title": "Long-duration lifecycle",
-      "detail": "A bounded restart/recovery/contention soak still needs a valid PASS.",
-      "resolutionItems": ["IDX-042"]
-    },
-    {
-      "id": "U-006",
-      "title": "Long-form visual sampling",
-      "detail": "Adaptive sampling is encoded but representative long-form near-duplicate behavior remains to be validated when suitable footage is available.",
-      "resolutionItems": ["IDX-042"]
     }
   ],
   "phases": [
@@ -171,7 +164,7 @@
     {"id":"IDX-039","phase":"retrieval","title":"Implement scratch leases and cleanup for temporary source material","status":"done","execution":"github","priority":"P0","required":true,"dependsOn":["IDX-035"],"acceptance":["Successful and failed jobs clean temporary source bytes while persistent derived artifacts remain separate."]},
     {"id":"IDX-040","phase":"operations","title":"Add persistent indexing queue and singleton worker ownership","status":"done","execution":"github","priority":"P1","required":true,"dependsOn":["IDX-039"],"acceptance":["GPU work runs outside FastAPI; queue state is resumable/retriable; stale worker ownership can be recovered."]},
     {"id":"IDX-041","phase":"operations","title":"Add Library indexing controls, progress, retry/cancel, and diagnostics","status":"done","execution":"github","priority":"P1","required":true,"dependsOn":["IDX-040"],"acceptance":["Library exposes bounded queue controls and diagnostics without running inference in request handlers."]},
-    {"id":"IDX-042","phase":"operations","title":"Complete bounded indexer restart/recovery/contention soak","status":"in_progress","execution":"codex","priority":"P1","required":true,"dependsOn":["IDX-041"],"acceptance":["Indexer survives stop/start and stale lease/PID recovery in a bounded main-only soak.","Scratch remains cleaned and the web app stays responsive while index work is active.","Record achieved Trace volume and SQLite vector-retrieval latency separately from query-model startup."],"evidence":["2026-08-26 soak: health 63/63 and scratch 0 bytes, but restart recovery exposed a PID/lease bug; fixes landed afterward.","A later main-only soak exceeded the fixed 1800-second profile budget and did not produce a valid acceptance PASS.","The observed 57.607s average / 134.42s max semantic search includes model startup and is moved to IDX-046 rather than being a soak acceptance decision."]},
+    {"id":"IDX-042","phase":"operations","title":"Complete bounded indexer restart/recovery/contention soak","status":"done","execution":"codex","priority":"P1","required":true,"dependsOn":["IDX-041"],"acceptance":["Indexer survives stop/start and stale lease/PID recovery in a bounded main-only soak.","Scratch remains cleaned and the web app stays responsive while index work is active.","Record achieved Trace volume and SQLite vector-retrieval latency separately from query-model startup."],"evidence":["Exact deployed main 0ce0ad68020b66874ef899097085ead9b2b6aa0b passed the 900-second main-only indexer soak on 2026-08-31.","The soak recorded 86/86 healthy web checks, including 3 checks while index jobs were running; stop/start and dead-owner lease reconciliation succeeded; scratch remained 0 bytes; live trace volume was 49,613.","Three semantic-query checks kept query-model and vector-retrieval latency separate: after the first cold-ish 15.923-second request, warm requests completed in 0.913s and 0.613s with vector retrieval at 271.129ms and 229.572ms respectively.","Representative long-form sampling covered 3 media / 233 adjacent visual pairs; aggregate p95 cosine was 0.912501 and no pair reached 0.98, validating representative near-duplicate behavior without inferring a pruning threshold."]},
     {"id":"IDX-043","phase":"workflow","title":"Integrate semantic result moments with source pull/open/editing actions","status":"todo","execution":"github","priority":"P2","required":true,"dependsOn":["IDX-034","IDX-038","IDX-042","IDX-046"],"acceptance":["A semantic result can open surrounding footage or materialize useful source/range without exposing storage complexity."]},
     {"id":"IDX-044","phase":"workflow","title":"Validate Find -> Judge -> Pull -> Edit on mobile and desktop","status":"todo","execution":"both","priority":"P0","required":true,"dependsOn":["IDX-043"],"acceptance":["A real user can retrieve, judge, and pull useful footage without knowing filename/date/source; mobile usage is practical."]},
     {"id":"IDX-045","phase":"operations","title":"Restore and guard production Clips native YouTube Ask workflow","status":"done","execution":"both","priority":"P0","required":true,"dependsOn":[],"acceptance":["Clips Update and production Clips candidates use only YouTube's native Ask interaction.","Direct Gemini video-analysis production routes are disabled and historical non-Ask candidates are excluded from the production feed.","A main-only real-browser host smoke passes on exact deployed main without increasing the direct-Gemini run count."],"evidence":["PR #7 restored production Clips to native YouTube Ask only and hard-disabled legacy direct-Gemini production routes.","PR #8 added main-only clips-native-ask-smoke. Exact deployed main 6c805f923c591967a0adaaf39f15a7112a41e254 passed 190/190 repo tests.","Live host smoke on regression stream pDC14ymQqWY passed: 3 production native-Ask candidates, production feed verified, direct-Gemini run count unchanged 4 -> 4, and all legacy direct-analysis routes returned HTTP 410."]},
