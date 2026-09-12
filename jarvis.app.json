@@ -1,5 +1,7 @@
 {
   "schemaVersion": 1,
+  "contractVersion": 2,
+  "appType": "web",
   "id": "shocks-art",
   "name": "Shocks Art",
   "route": "/shocks_art",
@@ -29,14 +31,8 @@
     "schemaVersion": 1
   },
   "network": {
-    "public": {
-      "httpsPort": 443,
-      "path": "/shocks_art"
-    },
-    "private": {
-      "httpsPort": 8443,
-      "path": "/shocks_art"
-    },
+    "public": { "httpsPort": 443, "path": "/shocks_art" },
+    "private": { "httpsPort": 8443, "path": "/shocks_art" },
     "upstream": "http://127.0.0.1:8000/shocks_art"
   }
 }
